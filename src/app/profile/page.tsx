@@ -12,6 +12,14 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { Loader2, User, Mail, Phone, MapPin, Shield, Key, Save, RefreshCw } from 'lucide-react';
 import { z } from 'zod';
@@ -87,6 +95,14 @@ export default function ProfilePage() {
     }
   }, [user, router]);
 
+  // Helper to get Zod error message
+  const getZodErrorMessage = (error: z.ZodError): string => {
+    if (error.issues && error.issues.length > 0) {
+      return error.issues[0].message;
+    }
+    return 'Validation error';
+  };
+
   // Handle profile update
   const handleProfileUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -127,7 +143,7 @@ export default function ProfilePage() {
 
     } catch (error) {
       if (error instanceof z.ZodError) {
-        setError(error.errors[0].message);
+        setError(getZodErrorMessage(error));
       } else if (error instanceof Error) {
         setError(error.message);
       } else {
@@ -197,7 +213,7 @@ export default function ProfilePage() {
 
     } catch (error) {
       if (error instanceof z.ZodError) {
-        setError(error.errors[0].message);
+        setError(getZodErrorMessage(error));
       } else if (error instanceof Error) {
         setError(error.message);
       } else {
@@ -326,7 +342,7 @@ export default function ProfilePage() {
 
     } catch (error) {
       if (error instanceof z.ZodError) {
-        setError(error.errors[0].message);
+        setError(getZodErrorMessage(error));
       } else if (error instanceof Error) {
         setError(error.message);
       } else {
@@ -629,7 +645,7 @@ export default function ProfilePage() {
                     </Alert>
                   </CardContent>
                   <CardFooter>
-                    <Button type="submit" disabled={loading} variant="warning">
+                    <Button type="submit" disabled={loading}>
                       {loading ? (
                         <>
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
