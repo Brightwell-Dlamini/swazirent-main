@@ -106,7 +106,7 @@ export default function PublicPropertyPage() {
         setLoading(true);
         const propertyId = params.id as string;
 
-        // Fetch property with landlord and photos
+        // Fetch property with landlord and photos - ⚠️ INCLUDING email
         const { data, error: propertyError } = await supabase
           .from('properties')
           .select(`
@@ -114,7 +114,8 @@ export default function PublicPropertyPage() {
             landlord:profiles!properties_landlord_id_fkey (
               full_name,
               phone,
-              is_verified
+              is_verified,
+              email  -- ⚠️ Include email for contact
             ),
             photos:property_photos (
               id,
@@ -189,33 +190,25 @@ export default function PublicPropertyPage() {
 
   // Atomic view counter using RPC
   const recordView = async (propertyId: string) => {
-    // Prevent duplicate views in the same session
     if (viewRecorded) return;
     
     try {
-      // Call a Supabase function to atomically increment the view count
-      // This avoids the read-modify-write race condition
       const { error } = await supabase.rpc('increment_property_view', {
         property_id: propertyId,
       });
 
       if (error) {
-        // Fallback: If RPC doesn't exist, try a different approach
-        // Use a separate table for view tracking
         await recordViewWithSeparateTable(propertyId);
       } else {
         setViewRecorded(true);
       }
     } catch (error) {
       console.error('Error recording view:', error);
-      // Non-critical error, don't block the UI
     }
   };
 
-  // Fallback: Use a separate property_views table
   const recordViewWithSeparateTable = async (propertyId: string) => {
     try {
-      // Insert a view record
       const { error: insertError } = await supabase
         .from('property_views')
         .insert([
@@ -223,7 +216,7 @@ export default function PublicPropertyPage() {
             property_id: propertyId,
             viewed_at: new Date().toISOString(),
             viewer_id: user?.id || null,
-            ip_address: null, // Could be captured server-side
+            ip_address: null,
           },
         ]);
 
@@ -233,14 +226,6 @@ export default function PublicPropertyPage() {
       }
 
       setViewRecorded(true);
-
-      // Update the property view count (this could also be done via a trigger)
-      // For now, we'll do it atomically with a RPC or rely on a cron job
-      // to aggregate views from the property_views table
-
-      // Option: Use a simple increment on the property table
-      // This is still subject to race conditions but the property_views
-      // table provides the ground truth
       await supabase.rpc('increment_property_view', {
         property_id: propertyId,
       });
@@ -259,7 +244,8 @@ export default function PublicPropertyPage() {
           landlord:profiles!properties_landlord_id_fkey (
             full_name,
             phone,
-            is_verified
+            is_verified,
+            email
           ),
           photos:property_photos (
             id,
@@ -285,7 +271,6 @@ export default function PublicPropertyPage() {
     if (!property) return;
 
     if (method === 'phone') {
-      // Format phone for tel: link
       const phoneNumber = property.contact_phone.replace(/\s/g, '');
       window.location.href = `tel:${phoneNumber}`;
     } else if (method === 'whatsapp') {
@@ -299,7 +284,7 @@ export default function PublicPropertyPage() {
         '_blank',
       );
     } else if (method === 'email') {
-      // If we have the landlord's email, use it
+      // Now this will work because we included email in the query
       if (property.landlord?.email) {
         const subject = encodeURIComponent(`Property Inquiry: ${property.title}`);
         const body = encodeURIComponent(
@@ -307,8 +292,7 @@ export default function PublicPropertyPage() {
         );
         window.location.href = `mailto:${property.landlord.email}?subject=${subject}&body=${body}`;
       } else {
-        // Fallback: Show a contact form modal or redirect
-        toast.info('Email feature coming soon', {
+        toast.info('Email not available', {
           description: 'Please use WhatsApp or phone to contact the landlord.',
           duration: 5000,
         });
@@ -333,7 +317,6 @@ export default function PublicPropertyPage() {
         // User cancelled or share failed
       }
     } else {
-      // Fallback - copy to clipboard
       navigator.clipboard.writeText(url);
       toast.success('Link copied to clipboard!');
     }
@@ -350,7 +333,6 @@ export default function PublicPropertyPage() {
     setIsSaving(true);
     try {
       if (isSaved) {
-        // Remove from saved
         const { error } = await supabase
           .from('saved_properties')
           .delete()
@@ -361,7 +343,6 @@ export default function PublicPropertyPage() {
         setIsSaved(false);
         toast.success('Removed from saved properties');
       } else {
-        // Save property
         const { error } = await supabase
           .from('saved_properties')
           .insert([{
@@ -382,8 +363,6 @@ export default function PublicPropertyPage() {
   };
 
   const handleReport = () => {
-    if (!property) return;
-    // For now, redirect to a report page or show a dialog
     toast.info('Report feature coming soon', {
       description: 'You can report this listing through the admin panel.',
     });
@@ -616,7 +595,6 @@ export default function PublicPropertyPage() {
                       )}
                     </div>
 
-                    {/* Furnished */}
                     {property.is_furnished && (
                       <div className="mt-4">
                         <Badge variant="outline" className="bg-gray-50">
@@ -625,7 +603,6 @@ export default function PublicPropertyPage() {
                       </div>
                     )}
 
-                    {/* Lease Terms */}
                     {property.lease_terms && (
                       <div className="mt-4 pt-4 border-t">
                         <h3 className="font-semibold mb-2">Lease Terms</h3>
@@ -739,6 +716,7 @@ export default function PublicPropertyPage() {
                       variant="outline"
                       className="w-full h-12 text-base"
                       onClick={() => handleContact('email')}
+                      disabled={!property.landlord?.email}
                     >
                       <Mail className="mr-2 h-5 w-5" />
                       Send Email
@@ -755,6 +733,12 @@ export default function PublicPropertyPage() {
                       <p className="flex items-center gap-2 mt-1">
                         <MessageCircle className="h-4 w-4" />
                         <span>Also available on WhatsApp</span>
+                      </p>
+                    )}
+                    {property.landlord?.email && (
+                      <p className="flex items-center gap-2 mt-1">
+                        <Mail className="h-4 w-4" />
+                        <span className="truncate">{property.landlord.email}</span>
                       </p>
                     )}
                   </div>
