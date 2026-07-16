@@ -143,16 +143,17 @@ export default function PublicPropertyPage() {
         }
 
         // Check if property is active or rented (visible to public)
-        if (data.status !== 'active' && data.status !== 'rented') {
+        const status = (data as any)?.status;
+        if (status !== 'active' && status !== 'rented') {
           setError('This property is not available');
           return;
         }
 
         // Transform data
         const propertyData: Property = {
-          ...data,
-          landlord: data.landlord || undefined,
-          photos: data.photos || [],
+          ...(data as any),
+          landlord: (data as any).landlord || undefined,
+          photos: (data as any).photos || [],
         };
 
         setProperty(propertyData);
@@ -285,12 +286,14 @@ export default function PublicPropertyPage() {
       );
     } else if (method === 'email') {
       // Now this will work because we included email in the query
-      if (property.landlord?.email) {
+      // property.landlord typing may not include email in TS types, so guard safely
+      const landlordEmail = (property.landlord as any)?.email;
+      if (landlordEmail) {
         const subject = encodeURIComponent(`Property Inquiry: ${property.title}`);
         const body = encodeURIComponent(
           `Hello,\n\nI'm interested in your property "${property.title}" listed at E${property.price}/month.\n\nCould you provide more information?\n\nThank you.`,
         );
-        window.location.href = `mailto:${property.landlord.email}?subject=${subject}&body=${body}`;
+        window.location.href = `mailto:${landlordEmail}?subject=${subject}&body=${body}`;
       } else {
         toast.info('Email not available', {
           description: 'Please use WhatsApp or phone to contact the landlord.',
@@ -406,6 +409,7 @@ export default function PublicPropertyPage() {
   const primaryPhoto = getPrimaryPhoto(property.photos);
   const photoUrls = property.photos?.map(p => p.photo_url) || [];
   const displayPhone = formatPhoneForDisplay(property.contact_phone);
+  const landlordEmail = (property.landlord as { email?: string } | undefined)?.email;
 
   return (
     <main className="min-h-screen bg-gray-50">
@@ -716,7 +720,6 @@ export default function PublicPropertyPage() {
                       variant="outline"
                       className="w-full h-12 text-base"
                       onClick={() => handleContact('email')}
-                      disabled={!property.landlord?.email}
                     >
                       <Mail className="mr-2 h-5 w-5" />
                       Send Email
@@ -735,10 +738,10 @@ export default function PublicPropertyPage() {
                         <span>Also available on WhatsApp</span>
                       </p>
                     )}
-                    {property.landlord?.email && (
+                    {landlordEmail && (
                       <p className="flex items-center gap-2 mt-1">
                         <Mail className="h-4 w-4" />
-                        <span className="truncate">{property.landlord.email}</span>
+                        <span className="truncate">{landlordEmail}</span>
                       </p>
                     )}
                   </div>
