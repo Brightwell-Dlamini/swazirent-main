@@ -1,0 +1,88 @@
+tree -I 'node_modules' -L 10 >tree.txt
+.
+
+|-- DEPLOYMENT.md
+|-- README.md
+|-- TESTING.md
+|-- components.json
+|-- eslint.config.mjs
+|-- filetree.txt
+|-- invoice.html
+|-- next-env.d.ts
+|-- next.config.ts
+|-- package-lock.json
+|-- package.json
+|-- postcss.config.mjs
+|-- src
+|   |-- app
+|   |   |-- auth
+|   |   |   |-- login
+|   |   |   |   `-- page.tsx
+|   |   |   `-- signup
+|   |   |       `-- page.tsx
+|   |   |-- dashboard
+|   |   |   |-- admin
+|   |   |   |   `-- page.tsx
+|   |   |   |-- landlord
+|   |   |   |   `-- add-property
+|   |   |   |       `-- page.tsx
+|   |   |   `-- renter
+|   |   |       `-- page.tsx
+|   |   |-- favicon.ico
+|   |   |-- globals.css
+|   |   |-- layout.tsx
+|   |   |-- page.tsx
+|   |   |-- profile
+|   |   |   `-- page.tsx
+|   |   |-- properties
+|   |   |   `-- [id]
+|   |   |       `-- page.tsx
+|   |   `-- search
+|   |       `-- page.tsx
+|   |-- components
+|   |   |-- auth
+|   |   |-- forms
+|   |   |-- layout
+|   |   |   |-- Header.tsx
+|   |   |   `-- seo.tsx
+|   |   |-- properties
+|   |   |   `-- PropertyCard.tsx
+|   |   `-- ui
+|   |       |-- accordion.tsx
+|   |       |-- alert.tsx
+|   |       |-- avatar.tsx
+|   |       |-- badge.tsx
+|   |       |-- button.tsx
+|   |       |-- card.tsx
+|   |       |-- checkbox.tsx
+|   |       |-- dialog.tsx
+|   |       |-- dropdown-menu.tsx
+|   |       |-- error-boundary.tsx
+|   |       |-- input.tsx
+|   |       |-- label.tsx
+|   |       |-- loading-spinner.tsx
+|   |       |-- select.tsx
+|   |       |-- sheet.tsx
+|   |       |-- slider.tsx
+|   |       |-- switch.tsx
+|   |       |-- table.tsx
+|   |       |-- tabs.tsx
+|   |       `-- textarea.tsx
+|   |-- contexts
+|   |   `-- AuthContext.tsx
+|   |-- emails
+|   |   `-- WelcomeEmail.tsx
+|   |-- hooks
+|   |-- lib
+|   |   |-- email.ts
+|   |   |-- supabase.ts
+|   |   `-- utils.ts
+|   |-- middleware
+|   |-- types
+|   |   `-- property.ts
+|   `-- utils
+|-- tree.txt
+|-- tsconfig.json
+`-- vercel.json
+
+27 directories, 56 files

@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SwaziRent - Invoice for Complete Platform Development</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f3f4f6;
+            padding: 40px 20px;
+            color: #1f2937;
+            line-height: 1.5;
+        }
+
+        .invoice-container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            overflow: hidden;
+        }
+
+        .invoice-header {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 40px;
+            position: relative;
+        }
+
+        .invoice-header::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #f59e0b, #fbbf24);
+        }
+
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo-area h1 {
+            font-size: 36px;
+            font-weight: 800;
+            margin-bottom: 5px;
+            letter-spacing: -0.5px;
+        }
+
+        .logo-area p {
+            font-size: 16px;
+            opacity: 0.9;
+            font-weight: 300;
+        }
+
+        .invoice-badge {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 12px 24px;
+            border-radius: 50px;
+            font-size: 18px;
+            font-weight: 600;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .invoice-body {
+            padding: 40px;
+        }
+
+        .invoice-meta {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            margin-bottom: 40px;
+            padding-bottom: 30px;
+            border-bottom: 2px dashed #e5e7eb;
+        }
+
+        .meta-box {
+            background: #f9fafb;
+            padding: 20px;
+            border-radius: 12px;
+        }
+
+        .meta-box h3 {
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #6b7280;
+            margin-bottom: 10px;
+        }
+
+        .meta-box .company-name {
+            font-size: 20px;
+            font-weight: 700;
+            color: #1e3c72;
+            margin-bottom: 8px;
+        }
+
+        .meta-box p {
+            color: #4b5563;
+            margin-bottom: 4px;
+            font-size: 14px;
+        }
+
+        .invoice-details {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+
+        .detail-item {
+            background: #f3f4f6;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .detail-label {
+            font-size: 12px;
+            text-transform: uppercase;
+            color: #6b7280;
+            margin-bottom: 5px;
+        }
+
+        .detail-value {
+            font-size: 18px;
+            font-weight: 700;
+            color: #1e3c72;
+        }
+
+        .items-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 40px;
+        }
+
+        .items-table th {
+            background: #f3f4f6;
+            padding: 15px;
+            text-align: left;
+            font-size: 14px;
+            font-weight: 600;
+            color: #4b5563;
+            border-bottom: 2px solid #e5e7eb;
+        }
+
+        .items-table td {
+            padding: 20px 15px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .items-table td:last-child {
+            text-align: right;
+            font-weight: 600;
+        }
+
+        .item-description {
+            font-size: 16px;
+            font-weight: 600;
+            color: #1f2937;
+            margin-bottom: 4px;
+        }
+
+        .item-details {
+            font-size: 13px;
+            color: #6b7280;
+        }
+
+        .highlight-badge {
+            background: #f59e0b;
+            color: white;
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 12px;
+            display: inline-block;
+            margin-left: 8px;
+            font-weight: 500;
+        }
+
+        .totals-table {
+            width: 400px;
+            margin-left: auto;
+            margin-bottom: 40px;
+        }
+
+        .totals-table tr td {
+            padding: 12px 0;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .totals-table tr td:first-child {
+            font-weight: 500;
+            color: #4b5563;
+        }
+
+        .totals-table tr td:last-child {
+            text-align: right;
+            font-weight: 600;
+        }
+
+        .grand-total {
+            background: #1e3c72;
+            color: white;
+            font-weight: 700;
+        }
+
+        .grand-total td {
+            padding: 15px 0 !important;
+            border-bottom: none !important;
+        }
+
+        .grand-total td:last-child {
+            font-size: 24px;
+        }
+
+        .payment-section {
+            background: #f9fafb;
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+
+        .payment-section h3 {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            color: #1f2937;
+        }
+
+        .payment-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+        }
+
+        .payment-method {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid #e5e7eb;
+        }
+
+        .payment-method h4 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #1e3c72;
+        }
+
+        .payment-method p {
+            font-size: 14px;
+            color: #4b5563;
+            margin-bottom: 5px;
+        }
+
+        .payment-method .detail {
+            font-family: monospace;
+            background: #f3f4f6;
+            padding: 8px;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+
+        .terms-section {
+            font-size: 13px;
+            color: #6b7280;
+            border-top: 1px solid #e5e7eb;
+            padding-top: 20px;
+            margin-bottom: 20px;
+        }
+
+        .terms-section p {
+            margin-bottom: 8px;
+        }
+
+        .footer {
+            text-align: center;
+            padding: 20px;
+            background: #f9fafb;
+            border-top: 1px solid #e5e7eb;
+            font-size: 13px;
+            color: #6b7280;
+        }
+
+        .payment-status {
+            background: #dbeafe;
+            color: #1e40af;
+            padding: 8px 16px;
+            border-radius: 50px;
+            display: inline-block;
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        .payment-status.due {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .thank-you {
+            background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+            font-size: 18px;
+            font-weight: 500;
+        }
+
+        .thank-you strong {
+            font-size: 24px;
+            display: block;
+            margin-bottom: 10px;
+        }
+
+        @media print {
+            body {
+                background: white;
+                padding: 0;
+            }
+
+            .invoice-container {
+                box-shadow: none;
+            }
+
+            .payment-section {
+                break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="invoice-container">
+        <!-- Header -->
+        <div class="invoice-header">
+            <div class="header-content">
+                <div class="logo-area">
+                    <h1>🏠 SwaziRent</h1>
+                    <p>Your Complete Rental Platform Solution</p>
+                </div>
+                <div class="invoice-badge">
+                    INVOICE #SR-2026-001
+                </div>
+            </div>
+        </div>
+
+        <!-- Body -->
+        <div class="invoice-body">
+            <!-- Payment Status -->
+            <div class="payment-status due">
+                ⚡ PAYMENT DUE - Please pay by March 15, 2026
+            </div>
+
+            <!-- Invoice Meta -->
+            <div class="invoice-meta">
+                <div class="meta-box">
+                    <h3>BILL TO:</h3>
+                    <div class="company-name">[Client's Name/Company]</div>
+                    <p>📍 [Client's Address]</p>
+                    <p>📧 [Client's Email]</p>
+                    <p>📞 [Client's Phone]</p>
+                </div>
+                <div class="meta-box">
+                    <h3>FROM:</h3>
+                    <div class="company-name">[Your Name/Company]</div>
+                    <p>📍 [Your Address]</p>
+                    <p>📧 [Your Email]</p>
+                    <p>📞 [Your Phone]</p>
+                    <p>🆔 VAT/Tax ID: [Your Tax ID]</p>
+                </div>
+            </div>
+
+            <!-- Invoice Details -->
+            <div class="invoice-details">
+                <div class="detail-item">
+                    <div class="detail-label">Invoice Date</div>
+                    <div class="detail-value">February 28, 2026</div>
+                </div>
+                <div class="detail-item">
+                    <div class="detail-label">Due Date</div>
+                    <div class="detail-value">March 15, 2026</div>
+                </div>
+                <div class="detail-item">
+                    <div class="detail-label">Payment Terms</div>
+                    <div class="detail-value">Net 15</div>
+                </div>
+            </div>
+
+            <!-- Items Table -->
+            <table class="items-table">
+                <thead>
+                    <tr>
+                        <th>Description</th>
+                        <th>Quantity</th>
+                        <th>Rate (SZL)</th>
+                        <th>Amount (SZL)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Phase 1: Foundation & Setup -->
+                    <tr>
+                        <td>
+                            <div class="item-description">
+                                Phase 1: Foundation & Setup
+                                <span class="highlight-badge">Complete</span>
+                            </div>
+                            <div class="item-details">
+                                Next.js with TypeScript • Tailwind CSS • Supabase integration • Database schema design •
+                                Authentication setup
+                            </div>
+                        </td>
+                        <td>1</td>
+                        <td>3,500</td>
+                        <td>3,500</td>
+                    </tr>
+
+                    <!-- Phase 2: Authentication & UI -->
+                    <tr>
+                        <td>
+                            <div class="item-description">
+                                Phase 2: Authentication & UI
+                                <span class="highlight-badge">Complete</span>
+                            </div>
+                            <div class="item-details">
+                                User authentication (signup/login) • Homepage with hero section • City tiles • Featured
+                                listings • Renter dashboard
+                            </div>
+                        </td>
+                        <td>1</td>
+                        <td>4,500</td>
+                        <td>4,500</td>
+                    </tr>
+
+                    <!-- Phase 3: Core Features -->
+                    <tr>
+                        <td>
+                            <div class="item-description">
+                                Phase 3: Core Features
+                                <span class="highlight-badge">Complete</span>
+                            </div>
+                            <div class="item-details">
+                                Property search with filters • Property details with WhatsApp integration • Landlord
+                                dashboard • Add property form with photo upload • Image storage setup
+                            </div>
+                        </td>
+                        <td>1</td>
+                        <td>6,500</td>
+                        <td>6,500</td>
+                    </tr>
+
+                    <!-- Phase 4: Admin & Polish -->
+                    <tr>
+                        <td>
+                            <div class="item-description">
+                                Phase 4: Admin Dashboard & Polish
+                                <span class="highlight-badge">Complete</span>
+                            </div>
+                            <div class="item-details">
+                                Admin dashboard • User management • Listing verification • Report handling • Email
+                                notifications • Profile management • SEO optimization
+                            </div>
+                        </td>
+                        <td>1</td>
+                        <td>5,000</td>
+                        <td>5,000</td>
+                    </tr>
+
+                    <!-- Additional Services -->
+                    <tr>
+                        <td>
+                            <div class="item-description">
+                                WhatsApp Business API Integration
+                            </div>
+                            <div class="item-details">
+                                One-click WhatsApp contact with pre-filled messages
+                            </div>
+                        </td>
+                        <td>1</td>
+                        <td>1,500</td>
+                        <td>1,500</td>
+                    </tr>
+
+                    <tr>
+                        <td>
+                            <div class="item-description">
+                                Photo Storage & CDN Setup
+                            </div>
+                            <div class="item-details">
+                                Supabase storage configuration • Image optimization • CDN setup
+                            </div>
+                        </td>
+                        <td>1</td>
+                        <td>1,000</td>
+                        <td>1,000</td>
+                    </tr>
+
+                    <tr>
+                        <td>
+                            <div class="item-description">
+                                Email Notification System
+                            </div>
+                            <div class="item-details">
+                                Resend integration • Welcome emails • Listing approval/rejection emails • Report
+                                notifications
+                            </div>
+                        </td>
+                        <td>1</td>
+                        <td>1,000</td>
+                        <td>1,000</td>
+                    </tr>
+
+                    <tr>
+                        <td>
+                            <div class="item-description">
+                                Deployment & Configuration
+                            </div>
+                            <div class="item-details">
+                                Vercel deployment • Environment setup • SSL configuration • Domain setup • Production
+                                testing
+                            </div>
+                        </td>
+                        <td>1</td>
+                        <td>1,500</td>
+                        <td>1,500</td>
+                    </tr>
+
+                    <!-- Premium Features -->
+                    <tr>
+                        <td>
+                            <div class="item-description">
+                                🚀 Premium Feature: Advanced Analytics Dashboard
+                            </div>
+                            <div class="item-details">
+                                Property view tracking • User behavior analytics • Conversion tracking • Custom reports
+                            </div>
+                        </td>
+                        <td>1</td>
+                        <td>1,200</td>
+                        <td>1,200</td>
+                    </tr>
+
+                    <tr>
+                        <td>
+                            <div class="item-description">
+                                🚀 Premium Feature: Multi-language Support
+                            </div>
+                            <div class="item-details">
+                                English and siSwati language support • RTL layout support
+                            </div>
+                        </td>
+                        <td>1</td>
+                        <td>1,200</td>
+                        <td>1,200</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <!-- Totals -->
+            <table class="totals-table">
+                <tr>
+                    <td>Subtotal:</td>
+                    <td>SZL 26,900</td>
+                </tr>
+                <tr>
+                    <td>Discount (Early Bird):</td>
+                    <td>-SZL 1,900</td>
+                </tr>
+                <tr>
+                    <td>Subtotal after discount:</td>
+                    <td>SZL 25,000</td>
+                </tr>
+                <tr>
+                    <td>VAT (15%):</td>
+                    <td>SZL 3,750</td>
+                </tr>
+                <tr class="grand-total">
+                    <td style="background: #1e3c72; color: white; padding-left: 15px;">TOTAL DUE (SZL):</td>
+                    <td style="background: #1e3c72; color: white; padding-right: 15px;">SZL 28,750</td>
+                </tr>
+            </table>
+
+            <!-- Payment Information -->
+            <div class="payment-section">
+                <h3>💳 Payment Methods</h3>
+                <div class="payment-grid">
+                    <div class="payment-method">
+                        <h4>Bank Transfer (Eswatini)</h4>
+                        <p><strong>Bank:</strong> First National Bank (FNB)</p>
+                        <p><strong>Account Name:</strong> [Your Name/Company]</p>
+                        <p><strong>Account Number:</strong> 6270 1234 5678</p>
+                        <p><strong>Branch Code:</strong> 280-123</p>
+                        <p><strong>SWIFT:</strong> FIRNSZMX</p>
+                    </div>
+                    <div class="payment-method">
+                        <h4>Mobile Money</h4>
+                        <p><strong>MTN Mobile Money:</strong></p>
+                        <p class="detail">+268 76XX XXXX</p>
+                        <p><strong>WhatsApp for Payment:</strong></p>
+                        <p class="detail">+268 76XX XXXX</p>
+                    </div>
+                    <div class="payment-method">
+                        <h4>International Transfer</h4>
+                        <p><strong>Bank:</strong> Standard Bank</p>
+                        <p><strong>Account Name:</strong> [Your Name/Company]</p>
+                        <p><strong>Account Number:</strong> 9100 1234 5678</p>
+                        <p><strong>IBAN:</strong> SZ77 1234 5678 9012 3456</p>
+                        <p><strong>SWIFT:</strong> SBICSZMX</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- What's Included Summary -->
+            <div class="terms-section">
+                <h3 style="color: #1f2937; margin-bottom: 15px;">✅ What's Included in This Package:</h3>
+                <p>• Complete Source Code with TypeScript</p>
+                <p>• Full Database Schema and Migrations</p>
+                <p>• Admin Dashboard with User Management</p>
+                <p>• WhatsApp Integration for Direct Communication</p>
+                <p>• Photo Upload and Storage System</p>
+                <p>• Email Notification System</p>
+                <p>• Responsive Design (Mobile, Tablet, Desktop)</p>
+                <p>• 1 Year of Bug Fixes and Security Updates</p>
+                <p>• 30 Days Free Support After Launch</p>
+                <p>• Documentation and Deployment Guide</p>
+                <p>• 1 Hour Training Session (Video Call)</p>
+            </div>
+
+            <!-- Terms -->
+            <div class="terms-section">
+                <h3 style="color: #1f2937; margin-bottom: 15px;">📋 Terms & Conditions</h3>
+                <p>1. Payment is due within 15 days of invoice date.</p>
+                <p>2. Late payments incur a 5% fee per month.</p>
+                <p>3. Source code will be delivered upon full payment.</p>
+                <p>4. Hosting and domain costs are not included.</p>
+                <p>5. Additional features can be quoted separately.</p>
+                <p>6. All prices are in Swazi Lilangeni (SZL).</p>
+                <p>7. 30-day money-back guarantee if not satisfied.</p>
+            </div>
+
+            <!-- Thank You Note -->
+            <div class="thank-you">
+                <strong>🎉 Thank you for choosing SwaziRent!</strong>
+                We're excited to help you revolutionize the rental market in Eswatini.
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p>🏠 SwaziRent - Building the Future of Rental Housing in Eswatini</p>
+            <p>Invoice #SR-2026-001 | Generated: February 28, 2026</p>
+            <p>For questions, contact: [your-email] | +268 76XX XXXX</p>
+        </div>
+    </div>
+</body>
+
+</html>
