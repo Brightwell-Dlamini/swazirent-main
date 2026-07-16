@@ -1,12 +1,9 @@
 // src/app/auth/signup/page.tsx
-'use client';
-
 import { Suspense } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import SignUpForm from './SignUpForm';
 
-// Main page component with Suspense boundary
 export default function SignUpPage() {
   return (
     <Suspense fallback={

@@ -1,6 +1,4 @@
 // src/app/auth/login/page.tsx
-'use client';
-
 import { Suspense } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
