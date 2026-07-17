@@ -48,8 +48,6 @@ import {
   Loader2,
   Clock,
   AlertCircle,
-  TrendingUp,
-  TrendingDown,
   Building,
   Shield,
 } from 'lucide-react';
@@ -190,7 +188,8 @@ export default function LandlordDashboard() {
       const active = transformedData.filter((p) => p.status === 'active').length;
       const rented = transformedData.filter((p) => p.status === 'rented').length;
       const pending = transformedData.filter((p) => p.status === 'pending').length;
-      const rejected = transformedData.filter((p) => p.status === 'rejected').length;
+      // Use type assertion for rejected since it might not be in the type yet
+      const rejected = transformedData.filter((p) => (p.status as string) === 'rejected').length;
       const totalViews = transformedData.reduce((sum, p) => sum + (p.views || 0), 0);
 
       setStats({ total, active, rented, pending, rejected, totalViews });
