@@ -106,7 +106,7 @@ export default function PublicPropertyPage() {
         setLoading(true);
         const propertyId = params.id as string;
 
-        // Fetch property with landlord and photos - ⚠️ INCLUDING email
+        // Fetch property with landlord and photos
         const { data, error: propertyError } = await supabase
           .from('properties')
           .select(`
@@ -115,7 +115,7 @@ export default function PublicPropertyPage() {
               full_name,
               phone,
               is_verified,
-              email  -- ⚠️ Include email for contact
+              email
             ),
             photos:property_photos (
               id,
@@ -132,6 +132,7 @@ export default function PublicPropertyPage() {
           if (propertyError.code === 'PGRST116') {
             setError('Property not found');
           } else {
+            console.error('Property fetch error:', propertyError);
             throw propertyError;
           }
           return;
@@ -160,20 +161,24 @@ export default function PublicPropertyPage() {
 
         // Check if user has saved this property
         if (user) {
-          const { data: savedData } = await supabase
-            .from('saved_properties')
-            .select('id')
-            .eq('renter_id', user.id)
-            .eq('property_id', propertyId)
-            .single();
+          try {
+            const { data: savedData } = await supabase
+              .from('saved_properties')
+              .select('id')
+              .eq('renter_id', user.id)
+              .eq('property_id', propertyId)
+              .maybeSingle();
 
-          setIsSaved(!!savedData);
+            setIsSaved(!!savedData);
+          } catch (saveError) {
+            console.error('Error checking saved status:', saveError);
+          }
         }
 
         // Fetch similar properties
         await fetchSimilarProperties(propertyData);
 
-        // Increment view count using atomic RPC call
+        // Increment view count
         await recordView(propertyId);
 
       } catch (err) {
@@ -194,45 +199,57 @@ export default function PublicPropertyPage() {
     if (viewRecorded) return;
     
     try {
-      const { error } = await supabase.rpc('increment_property_view', {
+      // Try to use the RPC function first
+      const { error: rpcError } = await supabase.rpc('increment_property_view', {
         property_id: propertyId,
       });
 
-      if (error) {
-        await recordViewWithSeparateTable(propertyId);
+      if (rpcError) {
+        console.warn('RPC function not available, using fallback:', rpcError.message);
+        // Fallback: try direct update or use separate table
+        await recordViewWithFallback(propertyId);
       } else {
         setViewRecorded(true);
       }
     } catch (error) {
       console.error('Error recording view:', error);
+      // Try fallback on any error
+      await recordViewWithFallback(propertyId);
     }
   };
 
-  const recordViewWithSeparateTable = async (propertyId: string) => {
+  // Fallback method for recording views
+  const recordViewWithFallback = async (propertyId: string) => {
     try {
-      const { error: insertError } = await supabase
-        .from('property_views')
-        .insert([
-          {
+      // Try direct update first
+      const { error: updateError } = await supabase
+        .from('properties')
+        .update({ views: supabase.rpc('increment', { row_count: 1 }) })
+        .eq('id', propertyId);
+
+      if (updateError) {
+        // If that fails, try with a separate views table
+        const { error: insertError } = await supabase
+          .from('property_views')
+          .insert([{
             property_id: propertyId,
             viewed_at: new Date().toISOString(),
             viewer_id: user?.id || null,
-            ip_address: null,
-          },
-        ]);
+          }]);
 
-      if (insertError) {
-        console.error('Error inserting view record:', insertError);
-        return;
+        if (insertError) {
+          console.error('Error inserting view record:', insertError);
+          // Final fallback: just mark as viewed without persisting
+          setViewRecorded(true);
+          return;
+        }
       }
 
       setViewRecorded(true);
-      await supabase.rpc('increment_property_view', {
-        property_id: propertyId,
-      });
-
     } catch (error) {
-      console.error('Error recording view with separate table:', error);
+      console.error('Error in fallback view recording:', error);
+      // Mark as viewed anyway to prevent repeated attempts
+      setViewRecorded(true);
     }
   };
 
@@ -261,7 +278,10 @@ export default function PublicPropertyPage() {
         .limit(3)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error fetching similar properties:', error);
+        return;
+      }
       setSimilarProperties(data || []);
     } catch (error) {
       console.error('Error fetching similar properties:', error);
@@ -285,8 +305,6 @@ export default function PublicPropertyPage() {
         '_blank',
       );
     } else if (method === 'email') {
-      // Now this will work because we included email in the query
-      // property.landlord typing may not include email in TS types, so guard safely
       const landlordEmail = (property.landlord as any)?.email;
       if (landlordEmail) {
         const subject = encodeURIComponent(`Property Inquiry: ${property.title}`);
@@ -320,8 +338,12 @@ export default function PublicPropertyPage() {
         // User cancelled or share failed
       }
     } else {
-      navigator.clipboard.writeText(url);
-      toast.success('Link copied to clipboard!');
+      try {
+        await navigator.clipboard.writeText(url);
+        toast.success('Link copied to clipboard!');
+      } catch {
+        toast.error('Failed to copy link');
+      }
     }
   };
 
@@ -453,7 +475,7 @@ export default function PublicPropertyPage() {
             <Card className="overflow-hidden">
               <CardContent className="p-4">
                 {/* Main Image */}
-                <div className="relative h-100 md:h-125 mb-4 bg-gray-100 rounded-lg overflow-hidden">
+                <div className="relative h-96 md:h-[500px] mb-4 bg-gray-100 rounded-lg overflow-hidden">
                   {photoUrls.length > 0 ? (
                     <Image
                       src={photoUrls[selectedImage] || photoUrls[0]}
