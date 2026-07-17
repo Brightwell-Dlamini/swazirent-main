@@ -80,6 +80,7 @@ export function Header() {
     isLandlordRejected,
     submitVerification,
     isSubmitting,
+    refreshVerification, // ✅ ADDED THIS LINE
   } = useVerification();
   const { theme, toggleTheme } = useTheme();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
