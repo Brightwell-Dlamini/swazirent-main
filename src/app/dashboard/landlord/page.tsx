@@ -48,6 +48,8 @@ import {
   Loader2,
   Clock,
   AlertCircle,
+  TrendingUp,
+  TrendingDown,
   Building,
   Shield,
 } from 'lucide-react';
@@ -95,6 +97,7 @@ export default function LandlordDashboard() {
     active: 0,
     rented: 0,
     pending: 0,
+    rejected: 0,
     totalViews: 0,
   });
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -105,7 +108,6 @@ export default function LandlordDashboard() {
   // REFS TO PREVENT INFINITE LOOPS AND RE-RUNS
   const hasCheckedVerification = useRef(false);
   const hasFetchedProperties = useRef(false);
-  const isMounted = useRef(true);
 
   // Check verification status - ONLY ONCE
   useEffect(() => {
@@ -115,7 +117,7 @@ export default function LandlordDashboard() {
     
     hasCheckedVerification.current = true;
     refreshVerification();
-  }, [user, userType, isLandlordPending, refreshVerification]);
+  }, [user, userType, isLandlordPending]); // ← refreshVerification REMOVED from deps
 
   // Redirect if not authenticated or not a landlord
   useEffect(() => {
@@ -187,16 +189,17 @@ export default function LandlordDashboard() {
       const active = transformedData.filter((p) => p.status === 'active').length;
       const rented = transformedData.filter((p) => p.status === 'rented').length;
       const pending = transformedData.filter((p) => p.status === 'pending').length;
+      const rejected = transformedData.filter((p) => p.status === 'rejected').length;
       const totalViews = transformedData.reduce((sum, p) => sum + (p.views || 0), 0);
 
-      setStats({ total, active, rented, pending, totalViews });
+      setStats({ total, active, rented, pending, rejected, totalViews });
     } catch (error) {
       console.error('Error fetching properties:', error);
       toast.error('Failed to load properties');
     } finally {
       setLoading(false);
     }
-  }, [user, userType]);
+  }, [user]); // ← ONLY user, NOT userType
 
   // Fetch properties - ONLY ONCE
   useEffect(() => {
@@ -213,7 +216,7 @@ export default function LandlordDashboard() {
     
     hasFetchedProperties.current = true;
     fetchProperties();
-  }, [user, userType, isInitialized, fetchProperties]);
+  }, [user, userType, isInitialized]); // ← fetchProperties REMOVED from deps
 
   // Reset fetch flag when user changes (e.g., signs out and back in)
   useEffect(() => {
@@ -222,13 +225,6 @@ export default function LandlordDashboard() {
       hasCheckedVerification.current = false;
     }
   }, [user]);
-
-  // Cleanup
-  useEffect(() => {
-    return () => {
-      isMounted.current = false;
-    };
-  }, []);
 
   async function deletePropertyWithPhotos(propertyId: string) {
     try {
@@ -325,11 +321,11 @@ export default function LandlordDashboard() {
     }
   }
 
-  // Show loading state - only during initial load
-  if (!isInitialized || isLoading) {
+  // Loading state - only show if not initialized yet
+  if (!isInitialized || isLoading || loading) {
     return (
       <div className="container mx-auto px-4 py-8">
-        <div className="flex justify-center items-center min-h-[400px]">
+        <div className="flex justify-center items-center min-h-100">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       </div>
@@ -414,17 +410,6 @@ export default function LandlordDashboard() {
     return null;
   }
 
-  // Show loading for properties data
-  if (loading) {
-    return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex justify-center items-center min-h-[400px]">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="container mx-auto px-4 py-8">
       {/* Header */}
@@ -473,8 +458,8 @@ export default function LandlordDashboard() {
         </motion.div>
       )}
 
-      {/* Stats Cards - Remove the Rejected card */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
         <Card>
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
@@ -627,6 +612,8 @@ export default function LandlordDashboard() {
                                 ? 'default'
                                 : property.status === 'pending'
                                 ? 'secondary'
+                                : property.status === 'rejected'
+                                ? 'destructive'
                                 : 'outline'
                             }
                             className={
@@ -769,3 +756,4 @@ export default function LandlordDashboard() {
     </div>
   );
 }
+
