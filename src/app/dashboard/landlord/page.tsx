@@ -1,7 +1,7 @@
 // src/app/dashboard/landlord/page.tsx
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -87,7 +87,7 @@ const extractFilePathFromUrl = (url: string): string | null => {
 };
 
 export default function LandlordDashboard() {
-  const { user, userType, isLoading } = useAuth();
+  const { user, userType, isLoading, isInitialized } = useAuth();
   const { status, isLandlordVerified, isLandlordPending, isLandlordRejected, refreshVerification } = useVerification();
   const router = useRouter();
   const [properties, setProperties] = useState<PropertyWithPhotos[]>([]);
@@ -105,38 +105,47 @@ export default function LandlordDashboard() {
   const [deleting, setDeleting] = useState(false);
   const [showVerificationBanner, setShowVerificationBanner] = useState(true);
 
-  // Check verification status on mount if pending
+  // REFS TO PREVENT INFINITE LOOPS AND RE-RUNS
+  const hasCheckedVerification = useRef(false);
+  const hasFetchedProperties = useRef(false);
+  const isMounted = useRef(true);
+
+  // Check verification status - ONLY ONCE
   useEffect(() => {
-    if (user && userType === 'landlord' && isLandlordPending) {
-      refreshVerification();
-    }
+    if (!user || userType !== 'landlord') return;
+    if (hasCheckedVerification.current) return;
+    if (!isLandlordPending) return;
+    
+    hasCheckedVerification.current = true;
+    refreshVerification();
   }, [user, userType, isLandlordPending, refreshVerification]);
 
   // Redirect if not authenticated or not a landlord
   useEffect(() => {
-    if (!isLoading) {
-      if (!user) {
-        router.push('/auth/login');
-        return;
-      }
-      
-      if (userType === 'renter') {
-        router.push('/dashboard/renter');
-        toast.info('This page is for landlords only', {
-          description: 'Redirecting to your renter dashboard.',
-        });
-        return;
-      }
-      
-      if (userType === 'admin') {
-        router.push('/dashboard/admin');
-        toast.info('This page is for landlords only', {
-          description: 'Redirecting to your admin dashboard.',
-        });
-        return;
-      }
+    // Only redirect after initialization is complete
+    if (!isInitialized || isLoading) return;
+
+    if (!user) {
+      router.push('/auth/login');
+      return;
     }
-  }, [user, userType, isLoading, router]);
+    
+    if (userType === 'renter') {
+      router.push('/dashboard/renter');
+      toast.info('This page is for landlords only', {
+        description: 'Redirecting to your renter dashboard.',
+      });
+      return;
+    }
+    
+    if (userType === 'admin') {
+      router.push('/dashboard/admin');
+      toast.info('This page is for landlords only', {
+        description: 'Redirecting to your admin dashboard.',
+      });
+      return;
+    }
+  }, [user, userType, isLoading, isInitialized, router]);
 
   const fetchProperties = useCallback(async () => {
     if (!user || userType !== 'landlord') {
@@ -193,13 +202,37 @@ export default function LandlordDashboard() {
     }
   }, [user, userType]);
 
+  // Fetch properties - ONLY ONCE
   useEffect(() => {
-    if (user && userType === 'landlord') {
-      fetchProperties();
-    } else {
+    // Only proceed after initialization is complete
+    if (!isInitialized) return;
+    
+    if (!user || userType !== 'landlord') {
       setLoading(false);
+      return;
     }
-  }, [user, userType, fetchProperties]);
+    
+    // Skip if already fetched
+    if (hasFetchedProperties.current) return;
+    
+    hasFetchedProperties.current = true;
+    fetchProperties();
+  }, [user, userType, isInitialized, fetchProperties]);
+
+  // Reset fetch flag when user changes (e.g., signs out and back in)
+  useEffect(() => {
+    if (!user) {
+      hasFetchedProperties.current = false;
+      hasCheckedVerification.current = false;
+    }
+  }, [user]);
+
+  // Cleanup
+  useEffect(() => {
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
 
   async function deletePropertyWithPhotos(propertyId: string) {
     try {
@@ -296,11 +329,11 @@ export default function LandlordDashboard() {
     }
   }
 
-  // Loading state
-  if (isLoading || loading) {
+  // Show loading state - only during initial load
+  if (!isInitialized || isLoading) {
     return (
       <div className="container mx-auto px-4 py-8">
-        <div className="flex justify-center items-center min-h-100">
+        <div className="flex justify-center items-center min-h-[400px]">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       </div>
@@ -383,6 +416,17 @@ export default function LandlordDashboard() {
   // Show message if user is not a landlord
   if (userType !== 'landlord') {
     return null;
+  }
+
+  // Show loading for properties data
+  if (loading) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex justify-center items-center min-h-[400px]">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </div>
+    );
   }
 
   return (

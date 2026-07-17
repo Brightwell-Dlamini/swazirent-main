@@ -1,7 +1,7 @@
 // src/app/dashboard/admin/page.tsx
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
@@ -142,7 +142,7 @@ interface PropertyListing {
 
 // Admin only page
 export default function AdminDashboard() {
-  const { user, userType, isLoading: authLoading } = useAuth();
+  const { user, userType, isLoading: authLoading, isInitialized } = useAuth();
   const router = useRouter();
 
   // State
@@ -166,24 +166,29 @@ export default function AdminDashboard() {
   const [reportActionLoading, setReportActionLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
 
+  // Refs
+  const isMounted = useRef(true);
+  const hasFetchedData = useRef(false);
+
   // Auth check
   useEffect(() => {
-    if (!authLoading) {
-      if (!user) {
-        router.push('/auth/login');
-        return;
-      }
-      if (userType !== 'admin') {
-        router.push('/dashboard');
-        toast.error('Access denied. Admin only.');
-        return;
-      }
+    if (!isInitialized || authLoading) return;
+    
+    if (!user) {
+      router.push('/auth/login');
+      return;
     }
-  }, [user, userType, authLoading, router]);
+    if (userType !== 'admin') {
+      router.push('/dashboard');
+      toast.error('Access denied. Admin only.');
+      return;
+    }
+  }, [user, userType, authLoading, isInitialized, router]);
 
-  // Fetch dashboard data
+  // Fetch dashboard data - ONLY ONCE
   const fetchDashboardData = useCallback(async () => {
     if (!user || userType !== 'admin') return;
+    if (hasFetchedData.current) return;
 
     setLoading(true);
     try {
@@ -289,6 +294,7 @@ export default function AdminDashboard() {
         .order('created_at', { ascending: false });
 
       setReports(reportsData || []);
+      hasFetchedData.current = true;
 
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
@@ -299,16 +305,22 @@ export default function AdminDashboard() {
   }, [user, userType]);
 
   useEffect(() => {
-    if (user && userType === 'admin') {
+    if (user && userType === 'admin' && isInitialized && !hasFetchedData.current) {
       fetchDashboardData();
     }
-  }, [user, userType, fetchDashboardData]);
+  }, [user, userType, isInitialized, fetchDashboardData]);
+
+  // Cleanup
+  useEffect(() => {
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
 
   // Report actions
   const handleResolveReport = async (reportId: string) => {
     setReportActionLoading(true);
     try {
-      // First, get the report to find the property
       const { data: report, error: reportError } = await supabase
         .from('reports')
         .select('property_id, status')
@@ -317,7 +329,6 @@ export default function AdminDashboard() {
 
       if (reportError) throw reportError;
 
-      // Update the report status
       const { error: updateError } = await supabase
         .from('reports')
         .update({
@@ -329,15 +340,9 @@ export default function AdminDashboard() {
 
       if (updateError) throw updateError;
 
-      // Only update property status if the report was resolved (not dismissed)
-      // For resolved reports, we keep the property status as is
-      // The property might be active or pending review
-
-      // Update local state
       setReports(reports.filter(r => r.id !== reportId));
       toast.success('Report resolved successfully');
 
-      // Refresh stats
       await fetchDashboardData();
     } catch (error) {
       console.error('Error resolving report:', error);
@@ -351,7 +356,6 @@ export default function AdminDashboard() {
   const handleDismissReport = async (reportId: string) => {
     setReportActionLoading(true);
     try {
-      // Update the report status
       const { error: updateError } = await supabase
         .from('reports')
         .update({
@@ -363,11 +367,9 @@ export default function AdminDashboard() {
 
       if (updateError) throw updateError;
 
-      // Update local state
       setReports(reports.filter(r => r.id !== reportId));
       toast.success('Report dismissed');
 
-      // Refresh stats
       await fetchDashboardData();
     } catch (error) {
       console.error('Error dismissing report:', error);
@@ -421,9 +423,6 @@ export default function AdminDashboard() {
     if (!newCity.trim()) return;
 
     try {
-      // Since we don't have a cities table, we just update the UI
-      // The actual city list is derived from properties
-      // We could create a system_settings table for this
       setCities([...cities, newCity.trim()]);
       toast.success('City added (UI only - will appear when properties are listed)');
       setNewCity('');
@@ -436,7 +435,6 @@ export default function AdminDashboard() {
 
   const handleDeleteCity = async (city: string) => {
     try {
-      // Check if any properties use this city
       const { count } = await supabase
         .from('properties')
         .select('*', { count: 'exact', head: true })
@@ -472,7 +470,6 @@ export default function AdminDashboard() {
 
   const handleDeleteAmenity = async (amenity: string) => {
     try {
-      // Check if any properties use this amenity
       const { data } = await supabase
         .from('properties')
         .select('id')
@@ -492,11 +489,22 @@ export default function AdminDashboard() {
     }
   };
 
-  // Loading state
-  if (authLoading || loading) {
+  // Show loading state - only during initial load
+  if (!isInitialized || authLoading) {
     return (
       <div className="container mx-auto px-4 py-8">
-        <div className="flex justify-center items-center min-h-100">
+        <div className="flex justify-center items-center min-h-[400px]">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </div>
+    );
+  }
+
+  // Show loading for data
+  if (loading) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex justify-center items-center min-h-[400px]">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       </div>

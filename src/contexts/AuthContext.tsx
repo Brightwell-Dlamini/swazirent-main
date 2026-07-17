@@ -80,12 +80,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isInitialized, setIsInitialized] = useState(false);
   const router = useRouter();
   
-  // Refs to prevent re-fetches
+  // Refs to prevent re-fetches and state updates
   const isMountedRef = useRef(true);
   const initialLoadDoneRef = useRef(false);
   const profileFetchInProgressRef = useRef(false);
   const lastUserCheckRef = useRef<number>(0);
   const sessionCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isInitializedRef = useRef(false);
+  const userRef = useRef<User | null>(null);
+  const profileRef = useRef<UserProfile | null>(null);
 
   const userType = profile?.userType || null;
   const isVerified = profile?.isVerified || false;
@@ -100,13 +103,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data: AuthCache = JSON.parse(cached);
       const now = Date.now();
       
-      // Cache for 5 minutes (but we'll verify session separately)
+      // Cache for 5 minutes
       if (now - data.timestamp > 5 * 60 * 1000) {
         localStorage.removeItem(AUTH_CACHE_KEY);
         return null;
       }
       
-      // Reconstruct User object from cached data
       if (data.user) {
         return {
           id: data.user.id,
@@ -131,7 +133,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data: ProfileCache = JSON.parse(cached);
       const now = Date.now();
       
-      // Cache for 5 minutes
       if (now - data.timestamp > 5 * 60 * 1000) {
         localStorage.removeItem(PROFILE_CACHE_KEY);
         return null;
@@ -242,8 +243,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Check cache first (unless forced refresh)
       if (!forceRefresh) {
         const cached = getCachedProfile();
-        // Verify the cached profile belongs to this user by checking the user
-        // We'll validate this by checking if the cached email matches
         if (cached) {
           return {
             userType: cached.userType,
@@ -256,7 +255,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Prevent concurrent fetches
       if (profileFetchInProgressRef.current && !forceRefresh) {
-        // Wait a bit and return cached if available
         await new Promise(resolve => setTimeout(resolve, 100));
         const cached = getCachedProfile();
         if (cached) {
@@ -314,9 +312,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const userProfile = await fetchUserProfile(user.id, true);
       if (isMountedRef.current) {
-        setProfile(userProfile);
-        if (userProfile) {
-          cacheProfile(userProfile);
+        // Only update if changed
+        const currentProfileStr = JSON.stringify(profileRef.current);
+        const newProfileStr = JSON.stringify(userProfile);
+        if (currentProfileStr !== newProfileStr) {
+          setProfile(userProfile);
+          profileRef.current = userProfile;
+          if (userProfile) {
+            cacheProfile(userProfile);
+          }
         }
       }
     } catch (error) {
@@ -330,21 +334,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const currentUser = session?.user ?? null;
       
       if (currentUser) {
-        setUser(currentUser);
-        cacheUser(currentUser);
-        
-        const userProfile = await fetchUserProfile(currentUser.id, true);
-        if (isMountedRef.current) {
-          setProfile(userProfile);
-          if (userProfile) {
-            cacheProfile(userProfile);
+        // Only update if user changed
+        if (!userRef.current || userRef.current.id !== currentUser.id) {
+          setUser(currentUser);
+          userRef.current = currentUser;
+          cacheUser(currentUser);
+          
+          const userProfile = await fetchUserProfile(currentUser.id, true);
+          if (isMountedRef.current) {
+            if (JSON.stringify(profileRef.current) !== JSON.stringify(userProfile)) {
+              setProfile(userProfile);
+              profileRef.current = userProfile;
+              if (userProfile) {
+                cacheProfile(userProfile);
+              }
+            }
           }
         }
       } else {
-        setUser(null);
-        setProfile(null);
-        cacheUser(null);
-        cacheProfile(null);
+        if (userRef.current !== null) {
+          setUser(null);
+          userRef.current = null;
+          setProfile(null);
+          profileRef.current = null;
+          cacheUser(null);
+          cacheProfile(null);
+        }
       }
     } catch (error) {
       console.error('Error refreshing user:', error);
@@ -375,6 +390,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
           // Set user immediately
           setUser(data.user);
+          userRef.current = data.user;
           cacheUser(data.user);
 
           // Fetch profile
@@ -416,6 +432,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
 
           setProfile(userProfile);
+          profileRef.current = userProfile;
           cacheProfile(userProfile);
 
           const userType = userProfile.userType || 'renter';
@@ -467,10 +484,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
           if (profile) {
             setProfile(profile);
+            profileRef.current = profile;
             cacheProfile(profile);
           }
           
           setUser(data.user);
+          userRef.current = data.user;
           cacheUser(data.user);
 
           if (!data.session) {
@@ -497,7 +516,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await supabase.auth.signOut();
       setUser(null);
+      userRef.current = null;
       setProfile(null);
+      profileRef.current = null;
       cacheUser(null);
       cacheProfile(null);
       localStorage.removeItem(AUTH_CACHE_KEY);
@@ -528,14 +549,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (cachedUser && cachedProfile) {
           console.log('🔄 Restored from cache - instant display');
           setUser(cachedUser);
+          userRef.current = cachedUser;
           setProfile({
             userType: cachedProfile.userType,
             isVerified: cachedProfile.isVerified,
             fullName: cachedProfile.fullName,
             phone: cachedProfile.phone,
           });
+          profileRef.current = {
+            userType: cachedProfile.userType,
+            isVerified: cachedProfile.isVerified,
+            fullName: cachedProfile.fullName,
+            phone: cachedProfile.phone,
+          };
           setIsLoading(false);
           setIsInitialized(true);
+          isInitializedRef.current = true;
         }
 
         // 2. Verify session with Supabase (silently in background)
@@ -543,55 +572,60 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const currentUser = session?.user ?? null;
 
         if (currentUser) {
-          // Check if we need to update (user changed or profile outdated)
           const needUpdate = !cachedUser || cachedUser.id !== currentUser.id;
           
           if (needUpdate) {
             console.log('🔄 Session changed - updating from Supabase');
             setUser(currentUser);
+            userRef.current = currentUser;
             cacheUser(currentUser);
             
             const userProfile = await fetchUserProfile(currentUser.id, true);
             if (isMountedRef.current) {
-              setProfile(userProfile);
-              if (userProfile) {
-                cacheProfile(userProfile);
+              if (JSON.stringify(profileRef.current) !== JSON.stringify(userProfile)) {
+                setProfile(userProfile);
+                profileRef.current = userProfile;
+                if (userProfile) {
+                  cacheProfile(userProfile);
+                }
               }
             }
           }
-          // If we already had cached data, we're already showing it above
         } else if (cachedUser) {
-          // We have cached user but no session - clear it
           console.log('🔄 No session found, clearing cache');
           setUser(null);
+          userRef.current = null;
           setProfile(null);
+          profileRef.current = null;
           cacheUser(null);
           cacheProfile(null);
         }
 
       } catch (error) {
         console.error('Error initializing auth:', error);
-        // If we have cached data, keep it
         if (!getCachedUser()) {
           setUser(null);
+          userRef.current = null;
           setProfile(null);
+          profileRef.current = null;
         }
       } finally {
         if (isMountedRef.current) {
           setIsLoading(false);
           setIsInitialized(true);
+          isInitializedRef.current = true;
         }
       }
     };
 
     initializeAuth();
 
-    // === SET UP SESSION CHECK - ONLY ONCE, EVERY 30 MINUTES ===
-    // Not on visibility change!
+    // === SET UP SESSION CHECK - REDUCED FREQUENCY ===
+    // Check every 5 minutes instead of 30
     const checkSession = async () => {
       const now = Date.now();
-      // Only check every 30 minutes at most
-      if (now - lastUserCheckRef.current < 30 * 60 * 1000) {
+      // Only check every 5 minutes
+      if (now - lastUserCheckRef.current < 5 * 60 * 1000) {
         return;
       }
       lastUserCheckRef.current = now;
@@ -600,24 +634,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const { data: { session } } = await supabase.auth.getSession();
         const currentUser = session?.user ?? null;
         
-        if (currentUser && user) {
-          // Only update if user ID changed
-          if (currentUser.id !== user.id) {
+        if (currentUser && userRef.current) {
+          if (currentUser.id !== userRef.current.id) {
             setUser(currentUser);
+            userRef.current = currentUser;
             cacheUser(currentUser);
             
             const userProfile = await fetchUserProfile(currentUser.id, true);
             if (isMountedRef.current) {
-              setProfile(userProfile);
-              if (userProfile) {
-                cacheProfile(userProfile);
+              if (JSON.stringify(profileRef.current) !== JSON.stringify(userProfile)) {
+                setProfile(userProfile);
+                profileRef.current = userProfile;
+                if (userProfile) {
+                  cacheProfile(userProfile);
+                }
               }
             }
           }
-        } else if (!currentUser && user) {
-          // User was logged out
+        } else if (!currentUser && userRef.current) {
           setUser(null);
+          userRef.current = null;
           setProfile(null);
+          profileRef.current = null;
           cacheUser(null);
           cacheProfile(null);
         }
@@ -626,20 +664,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    // Check session every 30 minutes
-    sessionCheckIntervalRef.current = setInterval(checkSession, 30 * 60 * 1000);
-
-    // Only check on visibility change if it's been more than 30 minutes
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        const now = Date.now();
-        if (now - lastUserCheckRef.current > 30 * 60 * 1000) {
-          checkSession();
-        }
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    // Check session every 5 minutes (reduced from 30)
+    sessionCheckIntervalRef.current = setInterval(checkSession, 5 * 60 * 1000);
 
     // Listen for auth state changes (only on actual auth events, not tab switches)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -650,18 +676,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           
           if (currentUser) {
             setUser(currentUser);
+            userRef.current = currentUser;
             cacheUser(currentUser);
             
             const userProfile = await fetchUserProfile(currentUser.id, true);
             if (isMountedRef.current) {
-              setProfile(userProfile);
-              if (userProfile) {
-                cacheProfile(userProfile);
+              if (JSON.stringify(profileRef.current) !== JSON.stringify(userProfile)) {
+                setProfile(userProfile);
+                profileRef.current = userProfile;
+                if (userProfile) {
+                  cacheProfile(userProfile);
+                }
               }
             }
           } else {
             setUser(null);
+            userRef.current = null;
             setProfile(null);
+            profileRef.current = null;
             cacheUser(null);
             cacheProfile(null);
           }
@@ -673,7 +705,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (sessionCheckIntervalRef.current) {
         clearInterval(sessionCheckIntervalRef.current);
       }
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
       subscription.unsubscribe();
       isMountedRef.current = false;
     };

@@ -55,7 +55,7 @@ interface SearchAlert {
 }
 
 export default function RenterDashboard() {
-  const { user, isLoading: authLoading } = useAuth();
+  const { user, isLoading: authLoading, isInitialized } = useAuth();
   const router = useRouter();
   const [savedProperties, setSavedProperties] = useState<SavedProperty[]>([]);
   const [searchAlerts, setSearchAlerts] = useState<SearchAlert[]>([]);
@@ -63,6 +63,7 @@ export default function RenterDashboard() {
   const [editingAlert, setEditingAlert] = useState<SearchAlert | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [alertName, setAlertName] = useState('');
+  const isMounted = useRef(true);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -99,7 +100,6 @@ export default function RenterDashboard() {
 
       if (error) throw error;
 
-      // Transform data
       const transformedData: SavedProperty[] = (data || []).map((item: any) => ({
         id: item.id,
         property_id: item.property_id,
@@ -138,6 +138,13 @@ export default function RenterDashboard() {
       Promise.all([fetchSavedProperties(), fetchSearchAlerts()]);
     }
   }, [user, fetchSavedProperties, fetchSearchAlerts]);
+
+  // Cleanup
+  useEffect(() => {
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
 
   async function removeSavedProperty(id: string) {
     try {
@@ -251,10 +258,22 @@ export default function RenterDashboard() {
     return [...photos].sort((a, b) => a.display_order - b.display_order)[0];
   };
 
-  if (authLoading || loading) {
+  // Show loading state - only during initial load
+  if (!isInitialized || authLoading) {
     return (
       <div className="container mx-auto px-4 py-8">
-        <div className="flex justify-center items-center min-h-100">
+        <div className="flex justify-center items-center min-h-[400px]">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </div>
+    );
+  }
+
+  // Show loading for data
+  if (loading) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex justify-center items-center min-h-[400px]">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       </div>
