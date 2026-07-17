@@ -3,7 +3,7 @@
 
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
-import { User, AuthError } from '@supabase/supabase-js';
+import { User, AuthError, Session } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 
@@ -15,14 +15,10 @@ export const isValidUserType = (type: string | null | undefined): type is UserTy
 
 export const getDefaultRedirect = (userType: UserType | null): string => {
   switch (userType) {
-    case 'admin':
-      return '/dashboard/admin';
-    case 'landlord':
-      return '/dashboard/landlord';
-    case 'renter':
-      return '/dashboard/renter';
-    default:
-      return '/dashboard/renter'; // Safe default
+    case 'admin': return '/dashboard/admin';
+    case 'landlord': return '/dashboard/landlord';
+    case 'renter': return '/dashboard/renter';
+    default: return '/dashboard/renter';
   }
 };
 
@@ -38,6 +34,7 @@ interface AuthContextType {
   userType: UserType | null;
   isVerified: boolean;
   isLoading: boolean;
+  isInitialized: boolean;
   profile: UserProfile | null;
   signIn: (email: string, password: string) => Promise<{ error: AuthError | null }>;
   signUp: (
@@ -55,20 +52,135 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Cache keys
+const AUTH_CACHE_KEY = 'swazirent_auth_cache';
+const PROFILE_CACHE_KEY = 'swazirent_profile_cache';
+
+interface AuthCache {
+  user: {
+    id: string;
+    email: string;
+    user_metadata: Record<string, any>;
+  } | null;
+  timestamp: number;
+}
+
+interface ProfileCache {
+  userType: UserType;
+  isVerified: boolean;
+  fullName?: string;
+  phone?: string;
+  timestamp: number;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isInitialized, setIsInitialized] = useState(false);
   const router = useRouter();
-  const initializingRef = useRef(false);
-  const profileFetchInProgressRef = useRef<Map<string, Promise<UserProfile | null>>>(new Map());
+  
+  // Refs to prevent re-fetches
+  const isMountedRef = useRef(true);
+  const initialLoadDoneRef = useRef(false);
+  const profileFetchInProgressRef = useRef(false);
+  const lastUserCheckRef = useRef<number>(0);
+  const sessionCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const userType = profile?.userType || null;
   const isVerified = profile?.isVerified || false;
 
-  /**
-   * Create or update a user profile with UPSERT to handle race conditions
-   */
+  // === CACHE HELPERS ===
+
+  const getCachedUser = useCallback((): User | null => {
+    try {
+      const cached = localStorage.getItem(AUTH_CACHE_KEY);
+      if (!cached) return null;
+      
+      const data: AuthCache = JSON.parse(cached);
+      const now = Date.now();
+      
+      // Cache for 5 minutes (but we'll verify session separately)
+      if (now - data.timestamp > 5 * 60 * 1000) {
+        localStorage.removeItem(AUTH_CACHE_KEY);
+        return null;
+      }
+      
+      // Reconstruct User object from cached data
+      if (data.user) {
+        return {
+          id: data.user.id,
+          email: data.user.email,
+          user_metadata: data.user.user_metadata,
+          app_metadata: {},
+          aud: '',
+          created_at: '',
+        } as User;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const getCachedProfile = useCallback((): ProfileCache | null => {
+    try {
+      const cached = localStorage.getItem(PROFILE_CACHE_KEY);
+      if (!cached) return null;
+      
+      const data: ProfileCache = JSON.parse(cached);
+      const now = Date.now();
+      
+      // Cache for 5 minutes
+      if (now - data.timestamp > 5 * 60 * 1000) {
+        localStorage.removeItem(PROFILE_CACHE_KEY);
+        return null;
+      }
+      
+      return data;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const cacheUser = useCallback((userData: User | null) => {
+    try {
+      if (userData) {
+        const cacheData: AuthCache = {
+          user: {
+            id: userData.id,
+            email: userData.email || '',
+            user_metadata: userData.user_metadata || {},
+          },
+          timestamp: Date.now(),
+        };
+        localStorage.setItem(AUTH_CACHE_KEY, JSON.stringify(cacheData));
+      } else {
+        localStorage.removeItem(AUTH_CACHE_KEY);
+      }
+    } catch {
+      // Silently fail
+    }
+  }, []);
+
+  const cacheProfile = useCallback((profileData: UserProfile | null) => {
+    try {
+      if (profileData) {
+        const cacheData: ProfileCache = {
+          ...profileData,
+          timestamp: Date.now(),
+        };
+        localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(cacheData));
+      } else {
+        localStorage.removeItem(PROFILE_CACHE_KEY);
+      }
+    } catch {
+      // Silently fail
+    }
+  }, []);
+
+  // === AUTH FUNCTIONS ===
+
   const createUserProfile = useCallback(
     async (
       userId: string,
@@ -78,7 +190,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       phone?: string
     ): Promise<UserProfile | null> => {
       try {
-        // Use UPSERT with ON CONFLICT to handle race conditions
         const { data, error } = await supabase
           .from('profiles')
           .upsert(
@@ -106,34 +217,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (data) {
-          return {
+          const profileData = {
             userType: data.user_type,
             isVerified: data.is_verified || false,
             fullName: data.full_name,
             phone: data.phone,
           };
+          return profileData;
         }
 
-        // Fallback: If upsert didn't return data, try fetching
-        const { data: fetchData, error: fetchError } = await supabase
-          .from('profiles')
-          .select('user_type, is_verified, full_name, phone')
-          .eq('id', userId)
-          .maybeSingle();
-
-        if (fetchError) {
-          console.error('Error fetching profile after upsert:', fetchError.message);
-          return null;
-        }
-
-        return fetchData
-          ? {
-              userType: fetchData.user_type,
-              isVerified: fetchData.is_verified || false,
-              fullName: fetchData.full_name,
-              phone: fetchData.phone,
-            }
-          : null;
+        return null;
       } catch (error) {
         console.error('Error in createUserProfile:', error);
         return null;
@@ -142,134 +235,128 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
-  /**
-   * Fetch user profile with deduplication to prevent race conditions
-   */
   const fetchUserProfile = useCallback(
-    async (userId: string): Promise<UserProfile | null> => {
+    async (userId: string, forceRefresh = false): Promise<UserProfile | null> => {
       if (!userId) return null;
 
-      // Check if there's already a fetch in progress for this userId
-      const existingPromise = profileFetchInProgressRef.current.get(userId);
-      if (existingPromise) {
-        return existingPromise;
+      // Check cache first (unless forced refresh)
+      if (!forceRefresh) {
+        const cached = getCachedProfile();
+        // Verify the cached profile belongs to this user by checking the user
+        // We'll validate this by checking if the cached email matches
+        if (cached) {
+          return {
+            userType: cached.userType,
+            isVerified: cached.isVerified,
+            fullName: cached.fullName,
+            phone: cached.phone,
+          };
+        }
       }
 
-      const promise = (async () => {
-        try {
-          // Get the authenticated user to verify identity
-          const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
-
-          if (authError || !authUser) {
-            console.error('Error getting auth user:', authError?.message);
-            return null;
-          }
-
-          // Ensure the userId matches the authenticated user
-          if (authUser.id !== userId) {
-            console.error('User ID mismatch:', userId, 'vs', authUser.id);
-            return null;
-          }
-
-          // Fetch profile from database
-          const { data, error } = await supabase
-            .from('profiles')
-            .select('user_type, is_verified, full_name, phone')
-            .eq('id', userId)
-            .maybeSingle();
-
-          if (error) {
-            console.error('Error fetching profile:', error.message);
-            return null;
-          }
-
-          if (data) {
-            return {
-              userType: data.user_type,
-              isVerified: data.is_verified || false,
-              fullName: data.full_name,
-              phone: data.phone,
-            };
-          }
-
-          // Profile doesn't exist - create one with data from auth user
-          const userType = authUser.user_metadata?.user_type || 'renter';
-          const fullName = authUser.user_metadata?.full_name || authUser.email?.split('@')[0] || '';
-          const phone = authUser.user_metadata?.phone || null;
-
-          return await createUserProfile(userId, authUser.email!, userType, fullName, phone);
-        } catch (error) {
-          console.error('Error in fetchUserProfile:', error);
-          return null;
-        } finally {
-          // Clean up the promise from the map
-          profileFetchInProgressRef.current.delete(userId);
+      // Prevent concurrent fetches
+      if (profileFetchInProgressRef.current && !forceRefresh) {
+        // Wait a bit and return cached if available
+        await new Promise(resolve => setTimeout(resolve, 100));
+        const cached = getCachedProfile();
+        if (cached) {
+          return {
+            userType: cached.userType,
+            isVerified: cached.isVerified,
+            fullName: cached.fullName,
+            phone: cached.phone,
+          };
         }
-      })();
+        return null;
+      }
 
-      // Store the promise in the map
-      profileFetchInProgressRef.current.set(userId, promise);
-      return promise;
+      profileFetchInProgressRef.current = true;
+
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('user_type, is_verified, full_name, phone')
+          .eq('id', userId)
+          .maybeSingle();
+
+        if (error) {
+          console.error('Error fetching profile:', error.message);
+          return null;
+        }
+
+        if (data) {
+          const profileData = {
+            userType: data.user_type,
+            isVerified: data.is_verified || false,
+            fullName: data.full_name,
+            phone: data.phone,
+          };
+          cacheProfile(profileData);
+          return profileData;
+        }
+
+        return null;
+      } catch (error) {
+        console.error('Error in fetchUserProfile:', error);
+        return null;
+      } finally {
+        profileFetchInProgressRef.current = false;
+      }
     },
-    [createUserProfile]
+    [getCachedProfile, cacheProfile]
   );
 
-  /**
-   * Refresh the current user's session and profile
-   */
+  // === MAIN AUTH FUNCTIONS ===
+
+  const refreshUserType = useCallback(async () => {
+    if (!user) return;
+    
+    try {
+      const userProfile = await fetchUserProfile(user.id, true);
+      if (isMountedRef.current) {
+        setProfile(userProfile);
+        if (userProfile) {
+          cacheProfile(userProfile);
+        }
+      }
+    } catch (error) {
+      console.error('Error refreshing user type:', error);
+    }
+  }, [user, fetchUserProfile, cacheProfile]);
+
   const refreshUser = useCallback(async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const currentUser = session?.user ?? null;
-      setUser(currentUser);
-
+      
       if (currentUser) {
-        setIsLoading(true);
-        const userProfile = await fetchUserProfile(currentUser.id);
-        setProfile(userProfile);
-        setIsLoading(false);
+        setUser(currentUser);
+        cacheUser(currentUser);
+        
+        const userProfile = await fetchUserProfile(currentUser.id, true);
+        if (isMountedRef.current) {
+          setProfile(userProfile);
+          if (userProfile) {
+            cacheProfile(userProfile);
+          }
+        }
       } else {
+        setUser(null);
         setProfile(null);
-        setIsLoading(false);
+        cacheUser(null);
+        cacheProfile(null);
       }
     } catch (error) {
       console.error('Error refreshing user:', error);
-      setIsLoading(false);
     }
-  }, [fetchUserProfile]);
+  }, [fetchUserProfile, cacheUser, cacheProfile]);
 
-  /**
-   * Refresh only the user type/profile data
-   */
-  const refreshUserType = useCallback(async () => {
-    if (!user) return;
-
-    try {
-      setIsLoading(true);
-      const userProfile = await fetchUserProfile(user.id);
-      setProfile(userProfile);
-      setIsLoading(false);
-    } catch (error) {
-      console.error('Error refreshing user type:', error);
-      setIsLoading(false);
-    }
-  }, [user, fetchUserProfile]);
-
-  /**
-   * Redirect to the appropriate dashboard based on user type
-   */
   const redirectToDashboard = useCallback(() => {
     const type = profile?.userType || 'renter';
     const path = getDefaultRedirect(type);
-    
-    console.log(`Redirecting to: ${path} (userType: ${type})`);
     router.push(path);
-    router.refresh();
   }, [profile, router]);
 
-  /**
-   * Sign in with email and password
-   */
   const signIn = useCallback(
     async (email: string, password: string) => {
       try {
@@ -286,12 +373,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (data.user) {
           toast.success('Welcome back!');
 
-          // Fetch profile with retry logic for race conditions
-          let userProfile = await fetchUserProfile(data.user.id);
+          // Set user immediately
+          setUser(data.user);
+          cacheUser(data.user);
 
-          // If profile is null, try to create it with retry
+          // Fetch profile
+          let userProfile = await fetchUserProfile(data.user.id, true);
+
           if (!userProfile) {
-            console.warn('Profile not found, attempting to create...');
             userProfile = await createUserProfile(
               data.user.id,
               data.user.email!,
@@ -300,52 +389,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               data.user.user_metadata?.phone
             );
 
-            // If still null after creation, try one more fetch
             if (!userProfile) {
-              userProfile = await fetchUserProfile(data.user.id);
-            }
-          }
-
-          // If we still don't have a profile, create a default one
-          if (!userProfile) {
-            console.error('Failed to fetch or create profile, using default');
-            userProfile = {
-              userType: 'renter',
-              isVerified: false,
-              fullName: data.user.user_metadata?.full_name || data.user.email?.split('@')[0] || 'User',
-              phone: data.user.user_metadata?.phone || null,
-            };
-            
-            // Attempt to save the default profile to the database
-            try {
-              await supabase
-                .from('profiles')
-                .upsert({
-                  id: data.user.id,
-                  email: data.user.email!,
-                  full_name: userProfile.fullName,
-                  phone: userProfile.phone,
-                  user_type: 'renter',
-                  is_verified: false,
-                  updated_at: new Date().toISOString(),
-                });
-            } catch (dbError) {
-              console.error('Failed to save default profile:', dbError);
+              userProfile = {
+                userType: 'renter',
+                isVerified: false,
+                fullName: data.user.user_metadata?.full_name || data.user.email?.split('@')[0] || 'User',
+                phone: data.user.user_metadata?.phone || null,
+              };
+              
+              try {
+                await supabase
+                  .from('profiles')
+                  .upsert({
+                    id: data.user.id,
+                    email: data.user.email!,
+                    full_name: userProfile.fullName,
+                    phone: userProfile.phone,
+                    user_type: 'renter',
+                    is_verified: false,
+                    updated_at: new Date().toISOString(),
+                  });
+              } catch (dbError) {
+                console.error('Failed to save default profile:', dbError);
+              }
             }
           }
 
           setProfile(userProfile);
+          cacheProfile(userProfile);
 
-          // Ensure we have a valid userType before redirecting
           const userType = userProfile.userType || 'renter';
-          
-          // Determine redirect path based on user type with fallback
           const redirectPath = getDefaultRedirect(userType);
           
-          // If userType was invalid, update the profile
           if (!isValidUserType(userType)) {
-            console.warn(`Invalid user type: ${userType}, defaulting to renter`);
-            // Update the profile with default type
             await supabase
               .from('profiles')
               .update({ user_type: 'renter' })
@@ -353,7 +429,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
 
           router.push(redirectPath);
-          router.refresh();
         }
 
         return { error: null };
@@ -363,12 +438,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { error: authError };
       }
     },
-    [fetchUserProfile, createUserProfile, router]
+    [fetchUserProfile, createUserProfile, cacheUser, cacheProfile, router]
   );
 
-  /**
-   * Sign up with email and password
-   */
   const signUp = useCallback(
     async (email: string, password: string, userType: UserType, fullName?: string, phone?: string) => {
       try {
@@ -391,25 +463,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (data.user) {
-          // Create profile immediately after signup
           const profile = await createUserProfile(data.user.id, email, userType, fullName, phone);
 
           if (profile) {
             setProfile(profile);
+            cacheProfile(profile);
           }
+          
+          setUser(data.user);
+          cacheUser(data.user);
 
-          // Check if email confirmation is required
           if (!data.session) {
             toast.success('Account created! Please check your email to verify your account.');
             router.push('/auth/verify-email');
           } else {
             toast.success('Account created successfully!');
-
-            // Determine redirect path based on user type
             const redirectPath = getDefaultRedirect(userType);
             router.push(redirectPath);
           }
-          router.refresh();
         }
 
         return { error: null };
@@ -419,82 +490,201 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { error: authError };
       }
     },
-    [createUserProfile, router]
+    [createUserProfile, cacheUser, cacheProfile, router]
   );
 
-  /**
-   * Sign out the current user
-   */
   const signOut = useCallback(async () => {
     try {
       await supabase.auth.signOut();
       setUser(null);
       setProfile(null);
+      cacheUser(null);
+      cacheProfile(null);
+      localStorage.removeItem(AUTH_CACHE_KEY);
+      localStorage.removeItem(PROFILE_CACHE_KEY);
       toast.success('Signed out successfully');
       router.push('/');
-      router.refresh();
     } catch (error) {
       console.error('Error signing out:', error);
       toast.error('Failed to sign out');
     }
-  }, [router]);
+  }, [router, cacheUser, cacheProfile]);
 
-  /**
-   * Initialize auth state - only runs once
-   */
+  // === INITIALIZATION - ONLY RUNS ONCE ===
+
   useEffect(() => {
-    if (initializingRef.current) return;
-    initializingRef.current = true;
+    if (initialLoadDoneRef.current) return;
+    initialLoadDoneRef.current = true;
+    isMountedRef.current = true;
 
     const initializeAuth = async () => {
       setIsLoading(true);
+      
       try {
+        // 1. Try to restore from cache FIRST - instant display
+        const cachedUser = getCachedUser();
+        const cachedProfile = getCachedProfile();
+        
+        if (cachedUser && cachedProfile) {
+          console.log('🔄 Restored from cache - instant display');
+          setUser(cachedUser);
+          setProfile({
+            userType: cachedProfile.userType,
+            isVerified: cachedProfile.isVerified,
+            fullName: cachedProfile.fullName,
+            phone: cachedProfile.phone,
+          });
+          setIsLoading(false);
+          setIsInitialized(true);
+        }
+
+        // 2. Verify session with Supabase (silently in background)
         const { data: { session } } = await supabase.auth.getSession();
         const currentUser = session?.user ?? null;
-        setUser(currentUser);
 
         if (currentUser) {
-          const userProfile = await fetchUserProfile(currentUser.id);
-          setProfile(userProfile);
+          // Check if we need to update (user changed or profile outdated)
+          const needUpdate = !cachedUser || cachedUser.id !== currentUser.id;
+          
+          if (needUpdate) {
+            console.log('🔄 Session changed - updating from Supabase');
+            setUser(currentUser);
+            cacheUser(currentUser);
+            
+            const userProfile = await fetchUserProfile(currentUser.id, true);
+            if (isMountedRef.current) {
+              setProfile(userProfile);
+              if (userProfile) {
+                cacheProfile(userProfile);
+              }
+            }
+          }
+          // If we already had cached data, we're already showing it above
+        } else if (cachedUser) {
+          // We have cached user but no session - clear it
+          console.log('🔄 No session found, clearing cache');
+          setUser(null);
+          setProfile(null);
+          cacheUser(null);
+          cacheProfile(null);
         }
+
       } catch (error) {
         console.error('Error initializing auth:', error);
+        // If we have cached data, keep it
+        if (!getCachedUser()) {
+          setUser(null);
+          setProfile(null);
+        }
       } finally {
-        setIsLoading(false);
+        if (isMountedRef.current) {
+          setIsLoading(false);
+          setIsInitialized(true);
+        }
       }
     };
 
     initializeAuth();
 
-    // Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        const currentUser = session?.user ?? null;
-        setUser(currentUser);
+    // === SET UP SESSION CHECK - ONLY ONCE, EVERY 30 MINUTES ===
+    // Not on visibility change!
+    const checkSession = async () => {
+      const now = Date.now();
+      // Only check every 30 minutes at most
+      if (now - lastUserCheckRef.current < 30 * 60 * 1000) {
+        return;
+      }
+      lastUserCheckRef.current = now;
 
-        if (currentUser) {
-          setIsLoading(true);
-          const userProfile = await fetchUserProfile(currentUser.id);
-          setProfile(userProfile);
-          setIsLoading(false);
-        } else {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const currentUser = session?.user ?? null;
+        
+        if (currentUser && user) {
+          // Only update if user ID changed
+          if (currentUser.id !== user.id) {
+            setUser(currentUser);
+            cacheUser(currentUser);
+            
+            const userProfile = await fetchUserProfile(currentUser.id, true);
+            if (isMountedRef.current) {
+              setProfile(userProfile);
+              if (userProfile) {
+                cacheProfile(userProfile);
+              }
+            }
+          }
+        } else if (!currentUser && user) {
+          // User was logged out
+          setUser(null);
           setProfile(null);
-          setIsLoading(false);
+          cacheUser(null);
+          cacheProfile(null);
+        }
+      } catch (error) {
+        console.error('Session check error:', error);
+      }
+    };
+
+    // Check session every 30 minutes
+    sessionCheckIntervalRef.current = setInterval(checkSession, 30 * 60 * 1000);
+
+    // Only check on visibility change if it's been more than 30 minutes
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        const now = Date.now();
+        if (now - lastUserCheckRef.current > 30 * 60 * 1000) {
+          checkSession();
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Listen for auth state changes (only on actual auth events, not tab switches)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        // Only handle actual auth events, not passive checks
+        if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') {
+          const currentUser = session?.user ?? null;
+          
+          if (currentUser) {
+            setUser(currentUser);
+            cacheUser(currentUser);
+            
+            const userProfile = await fetchUserProfile(currentUser.id, true);
+            if (isMountedRef.current) {
+              setProfile(userProfile);
+              if (userProfile) {
+                cacheProfile(userProfile);
+              }
+            }
+          } else {
+            setUser(null);
+            setProfile(null);
+            cacheUser(null);
+            cacheProfile(null);
+          }
         }
       }
     );
 
     return () => {
+      if (sessionCheckIntervalRef.current) {
+        clearInterval(sessionCheckIntervalRef.current);
+      }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       subscription.unsubscribe();
-      initializingRef.current = false;
+      isMountedRef.current = false;
     };
-  }, [fetchUserProfile]);
+  }, []); // Empty dependency array - ONLY RUNS ONCE
 
   const value = {
     user,
     userType,
     isVerified,
     isLoading,
+    isInitialized,
     profile,
     signIn,
     signUp,
@@ -507,9 +697,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-/**
- * Hook to use auth context
- */
 export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {

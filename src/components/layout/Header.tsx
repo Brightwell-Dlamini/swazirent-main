@@ -23,6 +23,8 @@ import {
   Building2,
   ArrowRight,
   UserPlus,
+  Shield,
+  AlertCircle,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useVerification } from '@/hooks/useVerification';
@@ -43,7 +45,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertDialog,
@@ -55,66 +57,51 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import { Loader2 } from 'lucide-react';
 
 export function Header() {
   const router = useRouter();
   const pathname = usePathname();
-  const { user, userType, signOut, isLoading } = useAuth();
-  const { isLandlordVerified, isLandlordPending, refreshVerification } = useVerification();
+  const { user, userType, signOut, isLoading, isInitialized } = useAuth();
+  const { 
+    status, 
+    isLandlordVerified, 
+    isLandlordPending, 
+    isLandlordRejected,
+    submitVerification,
+    isSubmitting,
+  } = useVerification();
   const { theme, toggleTheme } = useTheme();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
-  const [isMounted, setIsMounted] = useState(false);
-  const [sessionStable, setSessionStable] = useState(false);
-  const sessionCheckCount = useRef(0);
-
-  // Mount tracking
-  useEffect(() => {
-    setIsMounted(true);
-    return () => setIsMounted(false);
-  }, []);
-
-  // Session stability tracking
-  useEffect(() => {
-    // After the initial auth check, mark session as stable
-    // This prevents flickering when the session is being revalidated
-    if (!isLoading) {
-      // Add a small delay to ensure session is properly restored
-      const timer = setTimeout(() => {
-        setSessionStable(true);
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-  }, [isLoading]);
+  const [showVerificationDialog, setShowVerificationDialog] = useState(false);
+  const [verificationDocs, setVerificationDocs] = useState<{
+    idDocument: File | null;
+    proofOfAddress: File | null;
+    businessLicense: File | null;
+  }>({
+    idDocument: null,
+    proofOfAddress: null,
+    businessLicense: null,
+  });
 
   // Close mobile menu on route change
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [pathname]);
 
-  // Keep session alive when tab becomes active again
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        // Tab became visible again - session will be checked by Supabase
-        // but we can show a loading state briefly
-        setSessionStable(false);
-        
-        // After a short delay, mark as stable again
-        const timer = setTimeout(() => {
-          if (!isLoading) {
-            setSessionStable(true);
-          }
-        }, 1000);
-        return () => clearTimeout(timer);
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [isLoading]);
+  // ONLY show loading on initial page load, never on tab switches
+  const showLoading = !isInitialized && isLoading;
 
   const getUserInitials = () => {
     if (!user?.email) return 'U';
@@ -123,12 +110,9 @@ export function Header() {
 
   const getDashboardLink = () => {
     switch (userType) {
-      case 'admin':
-        return '/dashboard/admin';
-      case 'landlord':
-        return '/dashboard/landlord';
-      default:
-        return '/dashboard/renter';
+      case 'admin': return '/dashboard/admin';
+      case 'landlord': return '/dashboard/landlord';
+      default: return '/dashboard/renter';
     }
   };
 
@@ -136,6 +120,39 @@ export function Header() {
     setShowUpgradeDialog(false);
     const email = user?.email || '';
     router.push(`/auth/upgrade?email=${encodeURIComponent(email)}`);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'idDocument' | 'proofOfAddress' | 'businessLicense') => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 10 * 1024 * 1024) {
+        toast.error('File size must be under 10MB');
+        return;
+      }
+      setVerificationDocs(prev => ({ ...prev, [type]: file }));
+    }
+  };
+
+  const handleSubmitVerification = async () => {
+    if (!verificationDocs.idDocument) {
+      toast.error('Please upload an ID document');
+      return;
+    }
+
+    const success = await submitVerification({
+      idDocument: verificationDocs.idDocument,
+      proofOfAddress: verificationDocs.proofOfAddress || undefined,
+      businessLicense: verificationDocs.businessLicense || undefined,
+    });
+
+    if (success) {
+      setShowVerificationDialog(false);
+      setVerificationDocs({
+        idDocument: null,
+        proofOfAddress: null,
+        businessLicense: null,
+      });
+    }
   };
 
   const handleListProperty = (e: React.MouseEvent) => {
@@ -158,21 +175,25 @@ export function Header() {
         if (isLandlordVerified) {
           router.push('/dashboard/landlord/add-property');
         } else if (isLandlordPending) {
-          toast.error('Account Pending Verification', {
-            description:
-              'Your landlord account is being verified. You will be able to list properties once approved.',
+          toast.info('Verification in progress', {
+            description: 'Your documents are being reviewed. This typically takes 1-2 business days.',
             duration: 6000,
             action: {
-              label: 'Refresh Status',
-              onClick: () => refreshVerification(),
+              label: 'Check Status',
+              onClick: () => setShowVerificationDialog(true),
             },
           });
-          router.push('/dashboard/landlord');
-        } else {
-          refreshVerification();
-          toast.info('Checking verification status...', {
-            duration: 3000,
+        } else if (isLandlordRejected) {
+          toast.error('Verification rejected', {
+            description: 'Please submit new documents for review.',
+            duration: 6000,
+            action: {
+              label: 'Submit Again',
+              onClick: () => setShowVerificationDialog(true),
+            },
           });
+        } else {
+          setShowVerificationDialog(true);
         }
         break;
 
@@ -199,6 +220,7 @@ export function Header() {
         color: 'text-primary-600 dark:text-primary-400',
         bgColor: 'bg-primary-50 dark:bg-primary-950/50',
         badge: null,
+        tooltip: 'Create a landlord account to list properties',
       };
     }
 
@@ -206,10 +228,21 @@ export function Header() {
       if (isLandlordPending) {
         return {
           icon: Clock,
-          text: 'Verification Pending',
+          text: 'Verifying...',
           color: 'text-amber-600 dark:text-amber-400',
           bgColor: 'bg-amber-50 dark:bg-amber-950/50',
           badge: null,
+          tooltip: 'Your verification is being reviewed',
+        };
+      }
+      if (isLandlordRejected) {
+        return {
+          icon: AlertCircle,
+          text: 'Verification Failed',
+          color: 'text-red-600 dark:text-red-400',
+          bgColor: 'bg-red-50 dark:bg-red-950/50',
+          badge: null,
+          tooltip: 'Please submit new verification documents',
         };
       }
       if (isLandlordVerified) {
@@ -219,8 +252,17 @@ export function Header() {
           color: 'text-primary-600 dark:text-primary-400',
           bgColor: 'bg-primary-50 dark:bg-primary-950/50',
           badge: <Sparkles className="h-3 w-3 ml-1 text-amber-500 animate-pulse" />,
+          tooltip: 'List a new property',
         };
       }
+      return {
+        icon: Shield,
+        text: 'Get Verified',
+        color: 'text-purple-600 dark:text-purple-400',
+        bgColor: 'bg-purple-50 dark:bg-purple-950/50',
+        badge: null,
+        tooltip: 'Complete verification to list properties',
+      };
     }
 
     if (userType === 'renter') {
@@ -230,6 +272,7 @@ export function Header() {
         color: 'text-purple-600 dark:text-purple-400',
         bgColor: 'bg-purple-50 dark:bg-purple-950/50',
         badge: <ArrowRight className="h-3 w-3 ml-1" />,
+        tooltip: 'Upgrade to a landlord account',
       };
     }
 
@@ -239,6 +282,7 @@ export function Header() {
       color: 'text-primary-600 dark:text-primary-400',
       bgColor: 'bg-primary-50 dark:bg-primary-950/50',
       badge: null,
+      tooltip: 'List a property',
     };
   };
 
@@ -256,7 +300,6 @@ export function Header() {
     return pathname === href;
   };
 
-  // Animation variants
   const headerVariants = {
     initial: { y: -100 },
     animate: {
@@ -274,9 +317,6 @@ export function Header() {
     animate: { opacity: 1, x: 0 },
     exit: { opacity: 0, x: -20 },
   };
-
-  // Show loading state during session revalidation
-  const showLoading = !isMounted || (!sessionStable && isLoading);
 
   return (
     <>
@@ -365,6 +405,7 @@ export function Header() {
                 ${buttonContent.bgColor}
                 hover:shadow-md
               `}
+              title={buttonContent.tooltip}
             >
               <ButtonIcon className="h-4 w-4 transition-transform duration-200 group-hover:scale-110" />
               <span>{buttonContent.text}</span>
@@ -407,9 +448,8 @@ export function Header() {
               </Button>
             </motion.div>
 
-            {/* Auth Section */}
+            {/* Auth Section - Only show loading on initial page load */}
             {showLoading ? (
-              // Show loading state while session is being restored
               <div className="hidden md:flex items-center space-x-2">
                 <div className="h-9 w-20 rounded-lg bg-gray-200 dark:bg-gray-700 animate-pulse" />
                 <div className="h-9 w-20 rounded-lg bg-gray-200 dark:bg-gray-700 animate-pulse" />
@@ -440,6 +480,15 @@ export function Header() {
                             <span className="sr-only">Verified Landlord</span>
                           </motion.span>
                         )}
+                        {userType === 'landlord' && isLandlordPending && (
+                          <motion.span
+                            initial={{ scale: 0 }}
+                            animate={{ scale: 1 }}
+                            className="absolute -bottom-1 -right-1 w-4 h-4 bg-amber-500 border-2 border-white dark:border-gray-900 rounded-full shadow-lg animate-pulse"
+                          >
+                            <span className="sr-only">Verification Pending</span>
+                          </motion.span>
+                        )}
                       </motion.button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent
@@ -452,7 +501,7 @@ export function Header() {
                           <p className="text-sm font-medium leading-none text-gray-900 dark:text-white truncate">
                             {user.email}
                           </p>
-                          <div className="flex items-center space-x-2">
+                          <div className="flex items-center space-x-2 flex-wrap gap-1">
                             <p className="text-xs leading-none text-gray-500 dark:text-gray-400 capitalize flex items-center space-x-1">
                               <span>{userType}</span>
                             </p>
@@ -462,10 +511,16 @@ export function Header() {
                                 Verified
                               </span>
                             )}
-                            {userType === 'landlord' && !isLandlordVerified && (
+                            {userType === 'landlord' && isLandlordPending && (
                               <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200">
                                 <Clock className="h-3 w-3 mr-1" />
                                 Pending
+                              </span>
+                            )}
+                            {userType === 'landlord' && isLandlordRejected && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
+                                <AlertCircle className="h-3 w-3 mr-1" />
+                                Rejected
                               </span>
                             )}
                             {userType === 'renter' && (
@@ -488,6 +543,22 @@ export function Header() {
                           <ChevronRight className="ml-auto h-4 w-4 opacity-50" />
                         </Link>
                       </DropdownMenuItem>
+                      
+                      {userType === 'landlord' && !isLandlordVerified && (
+                        <DropdownMenuItem
+                          onClick={() => setShowVerificationDialog(true)}
+                          className="cursor-pointer text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300"
+                        >
+                          <Shield className="mr-2 h-4 w-4" />
+                          <span>Complete Verification</span>
+                          {isLandlordPending && (
+                            <span className="ml-auto text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+                              Pending
+                            </span>
+                          )}
+                        </DropdownMenuItem>
+                      )}
+
                       {userType === 'renter' && (
                         <DropdownMenuItem
                           onClick={() => setShowUpgradeDialog(true)}
@@ -598,7 +669,6 @@ export function Header() {
               >
                 <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
 
-                {/* Mobile Menu Header */}
                 <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-800">
                   <Link
                     href="/"
@@ -623,7 +693,6 @@ export function Header() {
                   </Button>
                 </div>
 
-                {/* Mobile Navigation */}
                 <nav className="flex flex-col p-4">
                   <AnimatePresence>
                     {navLinks.map((link, index) => {
@@ -672,7 +741,6 @@ export function Header() {
                       );
                     })}
 
-                    {/* List Property in Mobile */}
                     <motion.div
                       variants={mobileMenuItemVariants}
                       initial="initial"
@@ -697,7 +765,6 @@ export function Header() {
                       </button>
                     </motion.div>
 
-                    {/* Theme Toggle in Mobile */}
                     <motion.div
                       variants={mobileMenuItemVariants}
                       initial="initial"
@@ -744,7 +811,6 @@ export function Header() {
                     </motion.div>
                   </AnimatePresence>
 
-                  {/* Auth in Mobile */}
                   {!user && !showLoading && (
                     <motion.div
                       initial={{ opacity: 0, y: 20 }}
@@ -782,7 +848,6 @@ export function Header() {
                   )}
                 </nav>
 
-                {/* Footer in Mobile */}
                 {user && (
                   <motion.div
                     initial={{ opacity: 0 }}
@@ -804,6 +869,23 @@ export function Header() {
                           <ArrowRight className="h-4 w-4" />
                         </button>
                       )}
+                      {userType === 'landlord' && !isLandlordVerified && (
+                        <button
+                          onClick={() => {
+                            setShowVerificationDialog(true);
+                            setMobileMenuOpen(false);
+                          }}
+                          className="flex items-center space-x-3 p-3 rounded-xl w-full text-left text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/50 transition-all duration-200"
+                        >
+                          <Shield className="h-5 w-5" />
+                          <span className="flex-1 font-medium">
+                            {isLandlordPending ? 'Verification Pending' : 'Complete Verification'}
+                          </span>
+                          {isLandlordPending && (
+                            <Clock className="h-4 w-4 animate-pulse" />
+                          )}
+                        </button>
+                      )}
                       <button
                         onClick={() => {
                           signOut();
@@ -823,7 +905,7 @@ export function Header() {
         </div>
       </motion.header>
 
-      {/* Upgrade Dialog for Renters */}
+      {/* Upgrade Dialog */}
       <AlertDialog open={showUpgradeDialog} onOpenChange={setShowUpgradeDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -865,6 +947,166 @@ export function Header() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Verification Dialog */}
+      <Dialog open={showVerificationDialog} onOpenChange={setShowVerificationDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center space-x-2">
+              <Shield className="h-6 w-6 text-primary" />
+              <span>Verify Your Landlord Account</span>
+            </DialogTitle>
+            <DialogDescription>
+              {isLandlordPending 
+                ? 'Your verification is being reviewed. You\'ll receive an email once approved.'
+                : isLandlordRejected
+                ? 'Your previous verification was rejected. Please submit new documents.'
+                : 'Submit the required documents to verify your landlord account.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {isLandlordPending ? (
+            <div className="py-8 text-center">
+              <div className="h-12 w-12 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-4">
+                <Clock className="h-6 w-6 text-amber-600 animate-pulse" />
+              </div>
+              <h3 className="font-semibold text-lg mb-2">Verification in Progress</h3>
+              <p className="text-gray-500 text-sm">
+                Your documents are being reviewed by our team. This typically takes 1-2 business days.
+                You'll receive an email notification once your account is verified.
+              </p>
+              <Button
+                variant="outline"
+                className="mt-4"
+                onClick={() => {
+                  refreshVerification();
+                  toast.success('Status checked');
+                }}
+              >
+                Check Status
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Required Documents</Label>
+                <div className="space-y-3">
+                  <div className="border rounded-lg p-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium text-sm">Government ID</p>
+                        <p className="text-xs text-gray-500">Passport, Driver's License, or National ID</p>
+                      </div>
+                      <div className="relative">
+                        <Input
+                          type="file"
+                          accept="image/*,.pdf"
+                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                          onChange={(e) => handleFileChange(e, 'idDocument')}
+                        />
+                        <Button variant="outline" size="sm" type="button">
+                          {verificationDocs.idDocument ? 'Change' : 'Upload'}
+                        </Button>
+                      </div>
+                    </div>
+                    {verificationDocs.idDocument && (
+                      <p className="text-xs text-green-600 mt-1">
+                        ✓ {verificationDocs.idDocument.name}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="border rounded-lg p-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium text-sm">Proof of Address</p>
+                        <p className="text-xs text-gray-500">Utility bill or bank statement (last 3 months)</p>
+                      </div>
+                      <div className="relative">
+                        <Input
+                          type="file"
+                          accept="image/*,.pdf"
+                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                          onChange={(e) => handleFileChange(e, 'proofOfAddress')}
+                        />
+                        <Button variant="outline" size="sm" type="button">
+                          {verificationDocs.proofOfAddress ? 'Change' : 'Upload'}
+                        </Button>
+                      </div>
+                    </div>
+                    {verificationDocs.proofOfAddress && (
+                      <p className="text-xs text-green-600 mt-1">
+                        ✓ {verificationDocs.proofOfAddress.name}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="border rounded-lg p-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium text-sm">Business License</p>
+                        <p className="text-xs text-gray-500">Optional - For property management companies</p>
+                      </div>
+                      <div className="relative">
+                        <Input
+                          type="file"
+                          accept="image/*,.pdf"
+                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                          onChange={(e) => handleFileChange(e, 'businessLicense')}
+                        />
+                        <Button variant="outline" size="sm" type="button">
+                          {verificationDocs.businessLicense ? 'Change' : 'Upload'}
+                        </Button>
+                      </div>
+                    </div>
+                    {verificationDocs.businessLicense && (
+                      <p className="text-xs text-green-600 mt-1">
+                        ✓ {verificationDocs.businessLicense.name}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {isLandlordRejected && (
+                <div className="bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-800 rounded-lg p-3">
+                  <p className="text-sm text-red-600 dark:text-red-400">
+                    Your previous verification was rejected. Please submit new or updated documents.
+                  </p>
+                </div>
+              )}
+
+              <div className="bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+                <p className="text-xs text-blue-600 dark:text-blue-400">
+                  🔒 Your documents are securely stored and only used for verification purposes.
+                  We'll notify you via email once your account is verified.
+                </p>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowVerificationDialog(false)}>
+              {isLandlordPending ? 'Close' : 'Cancel'}
+            </Button>
+            {!isLandlordPending && (
+              <Button
+                onClick={handleSubmitVerification}
+                disabled={!verificationDocs.idDocument || isSubmitting}
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Submitting...
+                  </>
+                ) : (
+                  'Submit for Review'
+                )}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Spacer for fixed header */}
       <div className="h-16" />
