@@ -95,7 +95,6 @@ export default function LandlordDashboard() {
     active: 0,
     rented: 0,
     pending: 0,
-    rejected: 0,
     totalViews: 0,
   });
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -188,11 +187,9 @@ export default function LandlordDashboard() {
       const active = transformedData.filter((p) => p.status === 'active').length;
       const rented = transformedData.filter((p) => p.status === 'rented').length;
       const pending = transformedData.filter((p) => p.status === 'pending').length;
-      // Use type assertion for rejected since TypeScript is being strict
-      const rejected = transformedData.filter((p) => (p.status as string) === 'rejected').length;
       const totalViews = transformedData.reduce((sum, p) => sum + (p.views || 0), 0);
 
-      setStats({ total, active, rented, pending, rejected, totalViews });
+      setStats({ total, active, rented, pending, totalViews });
     } catch (error) {
       console.error('Error fetching properties:', error);
       toast.error('Failed to load properties');
@@ -476,8 +473,8 @@ export default function LandlordDashboard() {
         </motion.div>
       )}
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+      {/* Stats Cards - Remove the Rejected card */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <Card>
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
@@ -630,8 +627,6 @@ export default function LandlordDashboard() {
                                 ? 'default'
                                 : property.status === 'pending'
                                 ? 'secondary'
-                                : (property.status as string) === 'rejected'
-                                ? 'destructive'
                                 : 'outline'
                             }
                             className={

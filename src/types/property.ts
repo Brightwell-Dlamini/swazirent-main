@@ -1,5 +1,6 @@
 export type PropertyType = 'house' | 'apartment' | 'townhouse' | 'backrooms' | 'other'
-export type PropertyStatus = 'pending' | 'active' | 'rented' | 'reported'
+
+export type PropertyStatus = 'active' | 'pending' | 'rented' | 'reported';
 
 export interface Property {
     id: string
