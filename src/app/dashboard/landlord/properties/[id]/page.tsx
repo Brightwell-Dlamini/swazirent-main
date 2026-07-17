@@ -7,7 +7,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import { Property } from '@/types/property';
+import { Property, PropertyPhoto } from '@/types/property';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -29,16 +29,20 @@ import {
   TrendingDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { getPropertiesByLandlordId, setMockUserId } from '../../mockData';
 
-const USE_MOCK_DATA = true;
+// Remove: import { getPropertiesByLandlordId, setMockUserId } from '../../mockData';
+// Remove: const USE_MOCK_DATA = true;
+
+interface PropertyWithPhotos extends Property {
+  photos: PropertyPhoto[];
+}
 
 export default function LandlordPropertyManagePage() {
   const { user, isLoading: authLoading } = useAuth();
   const params = useParams();
   const router = useRouter();
 
-  const [property, setProperty] = useState<Property | null>(null);
+  const [property, setProperty] = useState<PropertyWithPhotos | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
@@ -67,60 +71,43 @@ export default function LandlordPropertyManagePage() {
 
       try {
         setLoading(true);
+        setError(null);
 
-        if (USE_MOCK_DATA) {
-          // Set the mock user ID
-          setMockUserId(user.id);
-
-          // Use mock data
-          await new Promise((resolve) => setTimeout(resolve, 800)); // Simulate loading
-
-          // First check if this property belongs to the user
-          const userProperties = getPropertiesByLandlordId(user.id);
-          const mockProperty = userProperties.find((p) => p.id === params.id);
-
-          if (!mockProperty) {
-            setError(
-              'Property not found or you do not have permission to view it',
-            );
-          } else {
-            setProperty(mockProperty);
-
-            // Calculate price comparison
-            await fetchPriceComparison(mockProperty);
-          }
-        } else {
-          // Use real Supabase data
-          const { data: propertyData, error: propertyError } = await supabase
-            .from('properties')
-            .select(
-              `
-              *,
-              photos:property_photos(*)
-            `,
+        // Fetch property with photos
+        const { data: propertyData, error: propertyError } = await supabase
+          .from('properties')
+          .select(
+            `
+            *,
+            photos:property_photos(
+              id,
+              property_id,
+              photo_url,
+              caption,
+              display_order,
+              created_at
             )
-            .eq('id', params.id)
-            .eq('landlord_id', user.id)
-            .order('display_order', { foreignTable: 'photos', ascending: true })
-            .single();
+          `
+          )
+          .eq('id', params.id)
+          .eq('landlord_id', user.id)
+          .order('display_order', { foreignTable: 'photos', ascending: true });
 
-          if (propertyError) {
-            if (propertyError.code === 'PGRST116') {
-              setError(
-                'Property not found or you do not have permission to view it',
-              );
-            } else {
-              throw propertyError;
-            }
-          }
+        if (propertyError) throw propertyError;
 
-          if (propertyData) {
-            setProperty(propertyData as Property);
-
-            // Calculate price comparison
-            await fetchPriceComparison(propertyData as Property);
-          }
+        if (!propertyData || propertyData.length === 0) {
+          setError(
+            'Property not found or you do not have permission to view it'
+          );
+          setProperty(null);
+          return;
         }
+
+        const property = propertyData[0] as PropertyWithPhotos;
+        setProperty(property);
+
+        // Calculate price comparison
+        await fetchPriceComparison(property);
       } catch (err) {
         const errorMessage =
           err instanceof Error ? err.message : 'Failed to load property';
@@ -136,93 +123,49 @@ export default function LandlordPropertyManagePage() {
     }
   }, [user, params.id]);
 
-  const fetchPriceComparison = async (currentProperty: Property) => {
+  const fetchPriceComparison = async (currentProperty: PropertyWithPhotos) => {
     try {
-      if (USE_MOCK_DATA) {
-        // Mock price comparison using mock data
-        const similarProps = getPropertiesByLandlordId(
-          currentProperty.landlord_id,
-        ).filter(
-          (p) =>
-            p.location_city === currentProperty.location_city &&
-            p.property_type === currentProperty.property_type &&
-            p.bedrooms === currentProperty.bedrooms &&
-            p.status === 'active' &&
-            p.id !== currentProperty.id,
-        );
+      // Fetch similar properties for price comparison
+      const { data, error } = await supabase
+        .from('properties')
+        .select('price')
+        .eq('location_city', currentProperty.location_city)
+        .eq('property_type', currentProperty.property_type)
+        .eq('bedrooms', currentProperty.bedrooms || 0)
+        .eq('status', 'active')
+        .not('id', 'eq', currentProperty.id);
 
-        if (similarProps.length === 0) {
-          setPriceComparison(null);
-          return;
-        }
+      if (error) throw error;
 
-        const prices = similarProps.map((p) => p.price);
-        const avg = prices.reduce((a, b) => a + b, 0) / prices.length;
-        const min = Math.min(...prices);
-        const max = Math.max(...prices);
-
-        let position: 'below' | 'above' | 'average' = 'average';
-        let diff = 0;
-
-        if (currentProperty.price < avg * 0.9) {
-          position = 'below';
-          diff = Math.round(((avg - currentProperty.price) / avg) * 100);
-        } else if (currentProperty.price > avg * 1.1) {
-          position = 'above';
-          diff = Math.round(((currentProperty.price - avg) / avg) * 100);
-        }
-
-        setPriceComparison({
-          average: avg,
-          min,
-          max,
-          count: similarProps.length,
-          position,
-          diff,
-        });
-      } else {
-        // Real Supabase price comparison
-        const { data, error } = await supabase
-          .from('properties')
-          .select('price')
-          .eq('location_city', currentProperty.location_city)
-          .eq('property_type', currentProperty.property_type)
-          .eq('bedrooms', currentProperty.bedrooms)
-          .eq('status', 'active')
-          .not('id', 'eq', currentProperty.id);
-
-        if (error) throw error;
-
-        if (!data || data.length === 0) {
-          setPriceComparison(null);
-          return;
-        }
-
-        const prices = data.map((p) => p.price);
-        const avg = prices.reduce((a, b) => a + b, 0) / prices.length;
-        const min = Math.min(...prices);
-        const max = Math.max(...prices);
-
-        let position: 'below' | 'above' | 'average' = 'average';
-        let diff = 0;
-
-        if (currentProperty.price < avg * 0.9) {
-          position = 'below';
-          diff = Math.round(((avg - currentProperty.price) / avg) * 100);
-        } else if (currentProperty.price > avg * 1.1) {
-          position = 'above';
-          diff = Math.round(((currentProperty.price - avg) / avg) * 100);
-        }
-
-        setPriceComparison({
-          average: avg,
-          min,
-          max,
-          count: data.length,
-          position,
-          diff,
-        });
+      if (!data || data.length === 0) {
+        setPriceComparison(null);
+        return;
       }
+
+      const prices = data.map((p) => p.price);
+      const avg = prices.reduce((a, b) => a + b, 0) / prices.length;
+      const min = Math.min(...prices);
+      const max = Math.max(...prices);
+
+      let position: 'below' | 'above' | 'average' = 'average';
+      let diff = 0;
+
+      if (currentProperty.price < avg * 0.9) {
+        position = 'below';
+        diff = Math.round(((avg - currentProperty.price) / avg) * 100);
+      } else if (currentProperty.price > avg * 1.1) {
+        position = 'above';
+        diff = Math.round(((currentProperty.price - avg) / avg) * 100);
+      }
+
+      setPriceComparison({
+        average: avg,
+        min,
+        max,
+        count: data.length,
+        position,
+        diff,
+      });
     } catch (error) {
       console.error('Error fetching price comparison:', error);
     }
@@ -232,22 +175,15 @@ export default function LandlordPropertyManagePage() {
     if (!property) return;
 
     try {
-      if (USE_MOCK_DATA) {
-        // Simulate status change
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        setProperty({ ...property, status: newStatus });
-        toast.success(`Property marked as ${newStatus}`);
-      } else {
-        const { error } = await supabase
-          .from('properties')
-          .update({ status: newStatus })
-          .eq('id', property.id);
+      const { error } = await supabase
+        .from('properties')
+        .update({ status: newStatus })
+        .eq('id', property.id);
 
-        if (error) throw error;
+      if (error) throw error;
 
-        setProperty({ ...property, status: newStatus });
-        toast.success(`Property marked as ${newStatus}`);
-      }
+      setProperty({ ...property, status: newStatus });
+      toast.success(`Property marked as ${newStatus}`);
     } catch (err) {
       console.error('Error updating status:', err);
       toast.error('Failed to update property status');
@@ -259,22 +195,15 @@ export default function LandlordPropertyManagePage() {
 
     setDeleting(true);
     try {
-      if (USE_MOCK_DATA) {
-        // Simulate delete
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        toast.success('Property deleted successfully');
-        router.push('/dashboard/landlord');
-      } else {
-        const { error } = await supabase
-          .from('properties')
-          .delete()
-          .eq('id', property.id);
+      const { error } = await supabase
+        .from('properties')
+        .delete()
+        .eq('id', property.id);
 
-        if (error) throw error;
+      if (error) throw error;
 
-        toast.success('Property deleted successfully');
-        router.push('/dashboard/landlord');
-      }
+      toast.success('Property deleted successfully');
+      router.push('/dashboard/landlord');
     } catch (err) {
       console.error('Error deleting property:', err);
       toast.error('Failed to delete property');
@@ -371,7 +300,7 @@ export default function LandlordPropertyManagePage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-gray-500">Views</p>
-                  <p className="text-2xl font-bold">{property.views}</p>
+                  <p className="text-2xl font-bold">{property.views || 0}</p>
                 </div>
                 <Eye className="h-8 w-8 text-blue-500 opacity-50" />
               </div>
@@ -451,8 +380,8 @@ export default function LandlordPropertyManagePage() {
                               priceComparison.position === 'below'
                                 ? 'text-blue-600'
                                 : priceComparison.position === 'above'
-                                  ? 'text-yellow-600'
-                                  : 'text-green-600'
+                                ? 'text-yellow-600'
+                                : 'text-green-600'
                             }`}
                           >
                             {priceComparison.position === 'below' && (
@@ -582,7 +511,7 @@ export default function LandlordPropertyManagePage() {
                         className="flex-col h-auto py-4"
                         onClick={() =>
                           handleStatusChange(
-                            property.status === 'active' ? 'rented' : 'active',
+                            property.status === 'active' ? 'rented' : 'active'
                           )
                         }
                       >
@@ -638,7 +567,7 @@ export default function LandlordPropertyManagePage() {
                             <span className="font-medium">
                               E
                               {Math.round(
-                                priceComparison.average,
+                                priceComparison.average
                               ).toLocaleString()}
                             </span>
                           </div>
@@ -649,8 +578,8 @@ export default function LandlordPropertyManagePage() {
                                 priceComparison.position === 'below'
                                   ? 'text-blue-600'
                                   : priceComparison.position === 'above'
-                                    ? 'text-yellow-600'
-                                    : 'text-green-600'
+                                  ? 'text-yellow-600'
+                                  : 'text-green-600'
                               }`}
                             >
                               E{property.price.toLocaleString()}
