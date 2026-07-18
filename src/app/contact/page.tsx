@@ -72,8 +72,8 @@ export default function ContactPage() {
     {
       icon: Mail,
       title: 'Email',
-      details: 'support@ekhaya.com',
-      link: 'mailto:support@Ekhaya.com',
+      details: 'support@swazirent.com',
+      link: 'mailto:support@swazirent.com',
       description: 'We respond within 24 hours',
     },
     {
@@ -98,7 +98,7 @@ export default function ContactPage() {
       answer: 'Click "List Your Property" in the navigation or visit the landlord dashboard. You\'ll need to create an account and verify your identity.',
     },
     {
-      question: 'Is Ekhaya free to use?',
+      question: 'Is SwaziRent free to use?',
       answer: 'Yes! Listing your property is free. We only charge a small fee when you successfully find a tenant through our platform.',
     },
     {
@@ -124,7 +124,7 @@ export default function ContactPage() {
               We'd Love to <span className="text-primary">Hear From You</span>
             </h1>
             <p className="text-xl text-gray-600 leading-relaxed">
-              Have questions about Ekhaya? Need help finding a property? 
+              Have questions about SwaziRent? Need help finding a property? 
               Our team is here to assist you.
             </p>
           </div>
@@ -264,7 +264,7 @@ export default function ContactPage() {
               <div className="mb-6">
                 <h2 className="text-2xl font-bold mb-2">Frequently Asked Questions</h2>
                 <p className="text-gray-600">
-                  Find quick answers to common questions about Ekhaya.
+                  Find quick answers to common questions about SwaziRent.
                 </p>
               </div>
               <div className="space-y-4">
@@ -284,8 +284,8 @@ export default function ContactPage() {
                   Reach out to us and we'll be happy to help.
                 </p>
                 <Button variant="link" className="p-0 h-auto text-primary mt-1" asChild>
-                  <Link href="mailto:support@ekhaya.com">
-                    support@ekhaya.com
+                  <Link href="mailto:support@swazirent.com">
+                    support@swazirent.com
                     <ArrowRight className="ml-1 h-3 w-3" />
                   </Link>
                 </Button>
@@ -353,7 +353,7 @@ export default function ContactPage() {
         <div className="container mx-auto px-4 text-center">
           <h2 className="text-3xl font-bold mb-4">Ready to Get Started?</h2>
           <p className="text-xl mb-8 opacity-90 max-w-2xl mx-auto">
-            Join the Ekhaya community today. Find your next home or list your property.
+            Join the SwaziRent community today. Find your next home or list your property.
           </p>
           <div className="flex flex-wrap justify-center gap-4">
             <Button size="lg" variant="secondary" asChild>
