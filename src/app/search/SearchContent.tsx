@@ -49,7 +49,7 @@ interface Filters {
   bedrooms: string;
   propertyType: PropertyType[];
   amenities: string[];
-  furnished: boolean;
+  fitted: boolean;
 }
 
 interface SavedSearch {
@@ -80,7 +80,7 @@ const PROPERTY_TYPES: PropertyType[] = ['house', 'flat/apartment',  'backroom','
 const FILTER_PRESETS = [
   { name: 'Under E2000', filters: { maxPrice: 2000 } },
   { name: '2+ Bedrooms', filters: { bedrooms: '2' } },
-  { name: 'Fitted', filters: { furnished: true } },
+  { name: 'Fitted', filters: { fitted: true } },
   { name: 'With Parking', filters: { amenities: ['Parking'] } },
 ];
 

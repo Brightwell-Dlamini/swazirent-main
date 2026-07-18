@@ -42,14 +42,13 @@ const CITIES = [
   'Hlatikulu', 'Mhlume', 'Simunye'
 ];
 
-const PROPERTY_TYPES: PropertyType[] = [
-  'house', 'apartment', 'townhouse', 'backrooms', 'other'
-];
+const PROPERTY_TYPES: PropertyType[] = ['house', 'flat/apartment',  'backroom','shared', 'other'];
 
-const AMENITIES = [
-  'Parking', 'Backup Water', 'Security', 'Garden', 'Furnished',
-  'Built-in Wardrobes', 'Pet Friendly', 'Electric Fence', '24hr Security',
-  'Swimming Pool', 'Staff Quarters', 'Solar Power'
+// Eswatini-specific amenities
+const ESWATINI_AMENITIES = [
+  'Parking', 'Own Electrity Meter', 'Shared Electrity Meter', 'Security', 'Own Water Meter', 'Fully Fitted',
+   'Pet Friendly', 'Shower', 'Bathtub'
+  
 ];
 
 interface PriceInsight {
