@@ -1,4 +1,4 @@
-export type PropertyType = 'house' | 'apartment' | 'townhouse' | 'backrooms' | 'other'
+export type PropertyType = 'house' | 'flat/apartment' | 'shared' | 'backrooms' | 'other'
 
 
 export type PropertyStatus = 'active' | 'pending' | 'rejected' | 'rented' | 'reported';
