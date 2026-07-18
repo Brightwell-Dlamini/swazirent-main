@@ -1,4 +1,4 @@
-// src/app/auth/signup/SignUpForm.tsx
+// src/app/auth/signup/SignUpForm.tsx (updated with Google login)
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -20,6 +20,7 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, User, Building, CheckCircle } from 'lucide-react';
 import { z } from 'zod';
+import SocialLoginButtons from '@/components/auth/SocialLoginButtons';
 
 // Validation schema
 const signUpSchema = z
@@ -154,9 +155,6 @@ export default function SignUpForm() {
         setIsLoading(false);
         return;
       }
-
-      // Success - navigation is handled in AuthContext
-      
     } catch (error: unknown) {
       console.error('Signup error:', error);
       setError(error instanceof Error ? error.message : 'An error occurred during signup');
@@ -165,6 +163,10 @@ export default function SignUpForm() {
       setIsLoading(false);
     }
   }
+
+  const handleSocialLoginError = (errorMessage: string) => {
+    setError(errorMessage);
+  };
 
   if (!isMounted) {
     return (
@@ -237,195 +239,203 @@ export default function SignUpForm() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {error && (
-                <Alert variant="destructive">
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              )}
+            <div className="space-y-6">
+              {/* Google Login Button */}
+              <SocialLoginButtons 
+                isLoading={isLoading || authLoading}
+                onError={handleSocialLoginError}
+              />
 
-              {/* User Type Selection */}
-              <div className="grid grid-cols-2 gap-4">
-                <Button
-                  type="button"
-                  variant={formData.userType === 'renter' ? 'default' : 'outline'}
-                  className={`h-20 flex flex-col items-center justify-center space-y-1 ${
-                    formData.userType === 'renter' ? 'bg-primary text-white' : ''
-                  }`}
-                  onClick={() => setFormData({ ...formData, userType: 'renter' })}
-                >
-                  <User className="h-6 w-6" />
-                  <span>I&apos;m a Renter</span>
-                </Button>
-                <Button
-                  type="button"
-                  variant={formData.userType === 'landlord' ? 'default' : 'outline'}
-                  className={`h-20 flex flex-col items-center justify-center space-y-1 ${
-                    formData.userType === 'landlord' ? 'bg-primary text-white' : ''
-                  }`}
-                  onClick={() => setFormData({ ...formData, userType: 'landlord' })}
-                >
-                  <Building className="h-6 w-6" />
-                  <span>I&apos;m a Landlord</span>
-                </Button>
-              </div>
-
-              {/* Full Name */}
-              <div className="space-y-2">
-                <Label htmlFor="fullName">Full Name</Label>
-                <Input
-                  id="fullName"
-                  placeholder="Thabo Dlamini"
-                  value={formData.fullName}
-                  onChange={(e) =>
-                    setFormData({ ...formData, fullName: e.target.value })
-                  }
-                  className={validationErrors.fullName ? 'border-red-500' : ''}
-                  required
-                />
-                {validationErrors.fullName && (
-                  <p className="text-sm text-red-500">
-                    {validationErrors.fullName}
-                  </p>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                {error && (
+                  <Alert variant="destructive">
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
                 )}
-              </div>
 
-              {/* Email */}
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="you@example.com"
-                  value={formData.email}
-                  onChange={(e) =>
-                    setFormData({ ...formData, email: e.target.value })
-                  }
-                  className={validationErrors.email ? 'border-red-500' : ''}
-                  required
-                />
-                {validationErrors.email && (
-                  <p className="text-sm text-red-500">
-                    {validationErrors.email}
-                  </p>
-                )}
-              </div>
-
-              {/* Phone */}
-              <div className="space-y-2">
-                <Label htmlFor="phone">Phone Number</Label>
-                <Input
-                  id="phone"
-                  type="tel"
-                  placeholder="+268 76XX XXXX"
-                  value={formData.phone}
-                  onChange={handlePhoneChange}
-                  className={validationErrors.phone ? 'border-red-500' : ''}
-                  required
-                />
-                {validationErrors.phone && (
-                  <p className="text-sm text-red-500">
-                    {validationErrors.phone}
-                  </p>
-                )}
-                <p className="text-xs text-gray-500">
-                  Format: +268 76XX XXXX or 76XX XXXX
-                </p>
-              </div>
-
-              {/* Password */}
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="••••••••"
-                  value={formData.password}
-                  onChange={(e) =>
-                    setFormData({ ...formData, password: e.target.value })
-                  }
-                  className={validationErrors.password ? 'border-red-500' : ''}
-                  required
-                />
-                {validationErrors.password && (
-                  <p className="text-sm text-red-500">
-                    {validationErrors.password}
-                  </p>
-                )}
-                <p className="text-xs text-gray-500">
-                  Must be at least 6 characters
-                </p>
-              </div>
-
-              {/* Confirm Password */}
-              <div className="space-y-2">
-                <Label htmlFor="confirmPassword">Confirm Password</Label>
-                <Input
-                  id="confirmPassword"
-                  type="password"
-                  placeholder="••••••••"
-                  value={formData.confirmPassword}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      confirmPassword: e.target.value,
-                    })
-                  }
-                  className={
-                    validationErrors.confirmPassword ? 'border-red-500' : ''
-                  }
-                  required
-                />
-                {validationErrors.confirmPassword && (
-                  <p className="text-sm text-red-500">
-                    {validationErrors.confirmPassword}
-                  </p>
-                )}
-              </div>
-
-              {/* Terms and Conditions */}
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="terms"
-                  checked={formData.agreeToTerms}
-                  onCheckedChange={(checked) =>
-                    setFormData({
-                      ...formData,
-                      agreeToTerms: checked as boolean,
-                    })
-                  }
-                />
-                <Label htmlFor="terms" className="text-sm">
-                  I agree to the{' '}
-                  <Link href="/terms" className="text-primary hover:underline">
-                    Terms and Conditions
-                  </Link>{' '}
-                  and{' '}
-                  <Link
-                    href="/privacy"
-                    className="text-primary hover:underline"
+                {/* User Type Selection */}
+                <div className="grid grid-cols-2 gap-4">
+                  <Button
+                    type="button"
+                    variant={formData.userType === 'renter' ? 'default' : 'outline'}
+                    className={`h-20 flex flex-col items-center justify-center space-y-1 ${
+                      formData.userType === 'renter' ? 'bg-primary text-white' : ''
+                    }`}
+                    onClick={() => setFormData({ ...formData, userType: 'renter' })}
                   >
-                    Privacy Policy
-                  </Link>
-                </Label>
-              </div>
-              {validationErrors.agreeToTerms && (
-                <p className="text-sm text-red-500">
-                  {validationErrors.agreeToTerms}
-                </p>
-              )}
+                    <User className="h-6 w-6" />
+                    <span>I&apos;m a Renter</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={formData.userType === 'landlord' ? 'default' : 'outline'}
+                    className={`h-20 flex flex-col items-center justify-center space-y-1 ${
+                      formData.userType === 'landlord' ? 'bg-primary text-white' : ''
+                    }`}
+                    onClick={() => setFormData({ ...formData, userType: 'landlord' })}
+                  >
+                    <Building className="h-6 w-6" />
+                    <span>I&apos;m a Landlord</span>
+                  </Button>
+                </div>
 
-              <Button type="submit" className="w-full" disabled={isLoading || authLoading}>
-                {isLoading || authLoading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Creating account...
-                  </>
-                ) : (
-                  'Sign Up'
+                {/* Full Name */}
+                <div className="space-y-2">
+                  <Label htmlFor="fullName">Full Name</Label>
+                  <Input
+                    id="fullName"
+                    placeholder="Thabo Dlamini"
+                    value={formData.fullName}
+                    onChange={(e) =>
+                      setFormData({ ...formData, fullName: e.target.value })
+                    }
+                    className={validationErrors.fullName ? 'border-red-500' : ''}
+                    required
+                  />
+                  {validationErrors.fullName && (
+                    <p className="text-sm text-red-500">
+                      {validationErrors.fullName}
+                    </p>
+                  )}
+                </div>
+
+                {/* Email */}
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={formData.email}
+                    onChange={(e) =>
+                      setFormData({ ...formData, email: e.target.value })
+                    }
+                    className={validationErrors.email ? 'border-red-500' : ''}
+                    required
+                  />
+                  {validationErrors.email && (
+                    <p className="text-sm text-red-500">
+                      {validationErrors.email}
+                    </p>
+                  )}
+                </div>
+
+                {/* Phone */}
+                <div className="space-y-2">
+                  <Label htmlFor="phone">Phone Number</Label>
+                  <Input
+                    id="phone"
+                    type="tel"
+                    placeholder="+268 76XX XXXX"
+                    value={formData.phone}
+                    onChange={handlePhoneChange}
+                    className={validationErrors.phone ? 'border-red-500' : ''}
+                    required
+                  />
+                  {validationErrors.phone && (
+                    <p className="text-sm text-red-500">
+                      {validationErrors.phone}
+                    </p>
+                  )}
+                  <p className="text-xs text-gray-500">
+                    Format: +268 76XX XXXX or 76XX XXXX
+                  </p>
+                </div>
+
+                {/* Password */}
+                <div className="space-y-2">
+                  <Label htmlFor="password">Password</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    placeholder="••••••••"
+                    value={formData.password}
+                    onChange={(e) =>
+                      setFormData({ ...formData, password: e.target.value })
+                    }
+                    className={validationErrors.password ? 'border-red-500' : ''}
+                    required
+                  />
+                  {validationErrors.password && (
+                    <p className="text-sm text-red-500">
+                      {validationErrors.password}
+                    </p>
+                  )}
+                  <p className="text-xs text-gray-500">
+                    Must be at least 6 characters
+                  </p>
+                </div>
+
+                {/* Confirm Password */}
+                <div className="space-y-2">
+                  <Label htmlFor="confirmPassword">Confirm Password</Label>
+                  <Input
+                    id="confirmPassword"
+                    type="password"
+                    placeholder="••••••••"
+                    value={formData.confirmPassword}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        confirmPassword: e.target.value,
+                      })
+                    }
+                    className={
+                      validationErrors.confirmPassword ? 'border-red-500' : ''
+                    }
+                    required
+                  />
+                  {validationErrors.confirmPassword && (
+                    <p className="text-sm text-red-500">
+                      {validationErrors.confirmPassword}
+                    </p>
+                  )}
+                </div>
+
+                {/* Terms and Conditions */}
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="terms"
+                    checked={formData.agreeToTerms}
+                    onCheckedChange={(checked) =>
+                      setFormData({
+                        ...formData,
+                        agreeToTerms: checked as boolean,
+                      })
+                    }
+                  />
+                  <Label htmlFor="terms" className="text-sm">
+                    I agree to the{' '}
+                    <Link href="/terms" className="text-primary hover:underline">
+                      Terms and Conditions
+                    </Link>{' '}
+                    and{' '}
+                    <Link
+                      href="/privacy"
+                      className="text-primary hover:underline"
+                    >
+                      Privacy Policy
+                    </Link>
+                  </Label>
+                </div>
+                {validationErrors.agreeToTerms && (
+                  <p className="text-sm text-red-500">
+                    {validationErrors.agreeToTerms}
+                  </p>
                 )}
-              </Button>
-            </form>
+
+                <Button type="submit" className="w-full" disabled={isLoading || authLoading}>
+                  {isLoading || authLoading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Creating account...
+                    </>
+                  ) : (
+                    'Sign Up'
+                  )}
+                </Button>
+              </form>
+            </div>
           </CardContent>
           <CardFooter className="flex flex-col space-y-4">
             <div className="text-sm text-center text-gray-500">

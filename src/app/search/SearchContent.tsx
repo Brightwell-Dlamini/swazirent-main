@@ -63,24 +63,24 @@ type ViewMode = 'grid' | 'list';
 
 // Eswatini cities
 const ESWATINI_CITIES = [
-  'Mbabane', 'Manzini', 'Ezulwini', 'Lobamba', 'Nhlangano',
-  'Piggs Peak', 'Siteki', 'Big Bend', 'Matsapha', 'Kwaluseni',
+  'Mbabane', 'Manzini','Matsapha', 'Ezulwini', 'Lobamba', 'Nhlangano',
+  'Piggs Peak', 'Siteki', 'Big Bend',  'Kwaluseni',
   'Hlatikulu', 'Mhlume', 'Simunye'
 ];
 
 // Eswatini-specific amenities
 const ESWATINI_AMENITIES = [
-  'Parking', 'Backup Water', 'Security', 'Garden', 'Furnished',
-  'Built-in Wardrobes', 'Pet Friendly', 'Electric Fence', '24hr Security',
-  'Swimming Pool', 'Staff Quarters', 'Solar Power'
+  'Parking', 'Own Electrity Meter', 'Shared Electrity Meter', 'Security', 'Own Water Meter', 'Fully Fitted',
+   'Pet Friendly', 'Shower', 'Bathtub'
+  
 ];
 
-const PROPERTY_TYPES: PropertyType[] = ['house', 'apartment', 'townhouse', 'backrooms', 'other'];
+const PROPERTY_TYPES: PropertyType[] = ['house', 'flat/apartment',  'backroom','shared', 'other'];
 
 const FILTER_PRESETS = [
   { name: 'Under E2000', filters: { maxPrice: 2000 } },
   { name: '2+ Bedrooms', filters: { bedrooms: '2' } },
-  { name: 'Furnished', filters: { furnished: true } },
+  { name: 'Fitted', filters: { furnished: true } },
   { name: 'With Parking', filters: { amenities: ['Parking'] } },
 ];
 
@@ -159,7 +159,7 @@ const FilterContent = memo(({
           <SelectItem value="1">1+</SelectItem>
           <SelectItem value="2">2+</SelectItem>
           <SelectItem value="3">3+</SelectItem>
-          <SelectItem value="4">4+</SelectItem>
+          
         </SelectContent>
       </Select>
     </div>
@@ -861,7 +861,7 @@ export default function SearchContent() {
                   onClick={() => setViewMode('grid')}
                   className={`px-3 py-1 text-sm transition-colors ${
                     viewMode === 'grid'
-                      ? 'bg-primary text-white'
+                      ? 'bg-primary text-white dark:text-gray-800'
                       : 'hover:bg-gray-100 dark:hover:bg-gray-800'
                   }`}
                 >
@@ -871,7 +871,7 @@ export default function SearchContent() {
                   onClick={() => setViewMode('list')}
                   className={`px-3 py-1 text-sm transition-colors ${
                     viewMode === 'list'
-                      ? 'bg-primary text-white'
+                      ? 'bg-primary text-white dark:text-gray-800'
                       : 'hover:bg-gray-100 dark:hover:bg-gray-800'
                   }`}
                 >

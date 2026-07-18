@@ -28,7 +28,6 @@ import {
   Bell,
   Heart,
   Settings,
-  ChevronLeft,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useVerification } from '@/hooks/useVerification';
@@ -49,7 +48,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertDialog,
@@ -469,33 +468,6 @@ export function Header() {
     return pathname === href;
   };
 
-  // Generate breadcrumbs
-  const generateBreadcrumbs = useCallback(() => {
-    if (!pathname || pathname === '/') return [];
-    
-    const segments = pathname.split('/').filter(Boolean);
-    const breadcrumbs = [];
-    let currentPath = '';
-    
-    for (const segment of segments) {
-      currentPath += `/${segment}`;
-      const label = segment
-        .split('-')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ');
-      
-      breadcrumbs.push({
-        label,
-        href: currentPath,
-        isCurrent: currentPath === pathname,
-      });
-    }
-    
-    return breadcrumbs;
-  }, [pathname]);
-
-  const breadcrumbs = generateBreadcrumbs();
-
   const headerVariants = {
     initial: { y: -100 },
     animate: {
@@ -523,7 +495,7 @@ export function Header() {
         className="fixed top-0 left-0 right-0 z-50 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm border-b border-gray-200 dark:border-gray-800"
       >
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          {/* Logo and Breadcrumbs */}
+          {/* Logo */}
           <div className="flex items-center space-x-4 min-w-0">
             <Link
               href="/"
@@ -543,34 +515,6 @@ export function Header() {
                 Ekhaya
               </span>
             </Link>
-
-            {/* Breadcrumbs - Desktop */}
-            {breadcrumbs.length > 0 && (
-              <nav className="hidden lg:flex items-center space-x-2 text-sm min-w-0" aria-label="Breadcrumb">
-                <ChevronLeft className="h-4 w-4 text-gray-400 shrink-0" />
-                <div className="flex items-center space-x-2 truncate">
-                  {breadcrumbs.map((crumb, index) => (
-                    <div key={crumb.href} className="flex items-center space-x-2">
-                      {index > 0 && (
-                        <ChevronRight className="h-3 w-3 text-gray-400 shrink-0" />
-                      )}
-                      {crumb.isCurrent ? (
-                        <span className="text-gray-700 dark:text-gray-300 font-medium truncate">
-                          {crumb.label}
-                        </span>
-                      ) : (
-                        <Link
-                          href={crumb.href}
-                          className="text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors truncate"
-                        >
-                          {crumb.label}
-                        </Link>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </nav>
-            )}
           </div>
 
           {/* Desktop Navigation - Hidden on mobile */}

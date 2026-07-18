@@ -23,6 +23,9 @@ import {
   Building,
   Home,
   Users,
+  Sparkles,
+  Shield,
+  Zap,
 } from 'lucide-react';
 
 export default function ContactPage() {
@@ -40,8 +43,6 @@ export default function ContactPage() {
     setLoading(true);
 
     try {
-      // Here you would integrate with your email service or API
-      // For now, we'll just simulate a successful submission
       await new Promise((resolve) => setTimeout(resolve, 1500));
       
       toast.success('Message sent successfully!');
@@ -112,18 +113,43 @@ export default function ContactPage() {
   ];
 
   return (
-    <main className="min-h-screen">
-      {/* Hero Section */}
-      <section className="bg-linear-to-b from-blue-50 to-white py-16 md:py-20">
-        <div className="container mx-auto px-4">
+    <main className="min-h-screen bg-white dark:bg-gray-950 transition-colors duration-300">
+      {/* ========== HERO SECTION ========== */}
+      <section className="relative overflow-hidden py-16 md:py-20 lg:py-24">
+        {/* Background */}
+        <div className="absolute inset-0 bg-gradient-to-br from-indigo-50/80 via-white to-purple-50/80 dark:from-gray-950 dark:via-gray-900 dark:to-gray-950 transition-colors duration-300" />
+        
+        {/* Gradient orbs */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div 
+            className="absolute -top-[40%] -right-[20%] w-[70%] h-[70%] rounded-full"
+            style={{
+              background: 'radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, transparent 70%)',
+              filter: 'blur(80px)',
+            }}
+          />
+          <div 
+            className="absolute -bottom-[30%] -left-[20%] w-[60%] h-[60%] rounded-full"
+            style={{
+              background: 'radial-gradient(circle, rgba(236, 72, 153, 0.1) 0%, transparent 70%)',
+              filter: 'blur(80px)',
+            }}
+          />
+        </div>
+
+        <div className="container mx-auto px-4 relative z-10">
           <div className="max-w-3xl mx-auto text-center">
-            <Badge className="mb-4 bg-primary/10 text-primary border-primary/20 px-4 py-1">
+            <Badge className="mb-4 md:mb-6 bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-500/30 px-4 py-1.5 text-xs md:text-sm transition-colors duration-300">
               Get in Touch
             </Badge>
-            <h1 className="text-4xl md:text-5xl font-bold mb-4">
-              We'd Love to <span className="text-primary">Hear From You</span>
+            <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold mb-3 md:mb-4 leading-tight">
+              <span className="text-gray-900 dark:text-white transition-colors duration-300">We'd Love to</span>
+              <br />
+              <span className="bg-gradient-to-r from-indigo-600 to-purple-600 dark:from-indigo-400 dark:to-purple-400 bg-clip-text text-transparent">
+                Hear From You
+              </span>
             </h1>
-            <p className="text-xl text-gray-600 leading-relaxed">
+            <p className="text-base sm:text-lg md:text-xl text-gray-600 dark:text-gray-300 leading-relaxed px-2 transition-colors duration-300">
               Have questions about SwaziRent? Need help finding a property? 
               Our team is here to assist you.
             </p>
@@ -131,10 +157,10 @@ export default function ContactPage() {
         </div>
       </section>
 
-      {/* Contact Info Cards */}
-      <section className="py-12 bg-white">
+      {/* ========== CONTACT INFO CARDS ========== */}
+      <section className="py-8 md:py-12 lg:py-16 bg-white dark:bg-gray-950 transition-colors duration-300 border-b border-gray-100 dark:border-gray-800">
         <div className="container mx-auto px-4">
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-5xl mx-auto">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 max-w-5xl mx-auto">
             {contactInfo.map((item, index) => {
               const Icon = item.icon;
               return (
@@ -145,16 +171,22 @@ export default function ContactPage() {
                   rel={item.icon === MapPin ? 'noopener noreferrer' : undefined}
                   className="group"
                 >
-                  <Card className="text-center hover:shadow-lg transition-all duration-300 hover:border-primary/20 h-full">
-                    <CardContent className="p-6">
-                      <div className="flex justify-center mb-3">
-                        <div className="p-3 bg-primary/10 rounded-full group-hover:bg-primary/20 transition-colors">
-                          <Icon className="h-6 w-6 text-primary" />
+                  <Card className="text-center hover:shadow-xl dark:hover:shadow-indigo-500/10 transition-all duration-300 hover:border-indigo-200 dark:hover:border-indigo-500/30 border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 h-full">
+                    <CardContent className="p-4 md:p-6 lg:p-8">
+                      <div className="flex justify-center mb-3 md:mb-4">
+                        <div className="p-2.5 md:p-3 bg-indigo-100 dark:bg-indigo-500/10 rounded-full group-hover:bg-indigo-200 dark:group-hover:bg-indigo-500/20 group-hover:scale-110 transition-all duration-300">
+                          <Icon className="h-5 w-5 md:h-6 md:w-6 text-indigo-600 dark:text-indigo-400" />
                         </div>
                       </div>
-                      <h3 className="font-semibold mb-1">{item.title}</h3>
-                      <p className="text-sm font-medium text-primary mb-1">{item.details}</p>
-                      <p className="text-xs text-gray-500">{item.description}</p>
+                      <h3 className="font-semibold text-sm md:text-base text-gray-900 dark:text-white transition-colors duration-300">
+                        {item.title}
+                      </h3>
+                      <p className="text-xs md:text-sm font-medium text-indigo-600 dark:text-indigo-400 mb-0.5 md:mb-1 transition-colors duration-300">
+                        {item.details}
+                      </p>
+                      <p className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400 transition-colors duration-300">
+                        {item.description}
+                      </p>
                     </CardContent>
                   </Card>
                 </a>
@@ -164,33 +196,39 @@ export default function ContactPage() {
         </div>
       </section>
 
-      {/* Contact Form & Info */}
-      <section className="py-16 bg-gray-50">
+      {/* ========== CONTACT FORM & FAQ ========== */}
+      <section className="py-12 md:py-20 lg:py-24 bg-gray-50 dark:bg-gray-900/50 transition-colors duration-300">
         <div className="container mx-auto px-4">
-          <div className="grid md:grid-cols-2 gap-12 max-w-5xl mx-auto">
+          <div className="grid md:grid-cols-2 gap-8 md:gap-12 lg:gap-16 max-w-6xl mx-auto">
             {/* Contact Form */}
             <div>
-              <div className="mb-6">
-                <h2 className="text-2xl font-bold mb-2">Send Us a Message</h2>
-                <p className="text-gray-600">
+              <div className="mb-5 md:mb-6">
+                <h2 className="text-2xl sm:text-3xl font-bold mb-2 text-gray-900 dark:text-white transition-colors duration-300">
+                  Send Us a Message
+                </h2>
+                <p className="text-sm md:text-base text-gray-600 dark:text-gray-400 transition-colors duration-300">
                   Fill in the form and we'll get back to you within 24 hours.
                 </p>
               </div>
-              <form onSubmit={handleSubmit} className="space-y-4">
+              <form onSubmit={handleSubmit} className="space-y-4 md:space-y-5">
                 <div>
-                  <Label htmlFor="name">Full Name *</Label>
+                  <Label htmlFor="name" className="text-sm md:text-base text-gray-700 dark:text-gray-300 transition-colors duration-300">
+                    Full Name <span className="text-red-500">*</span>
+                  </Label>
                   <Input
                     id="name"
                     placeholder="Your full name"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     required
-                    className="mt-1"
+                    className="mt-1.5 bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 transition-colors duration-300"
                   />
                 </div>
 
                 <div>
-                  <Label htmlFor="email">Email Address *</Label>
+                  <Label htmlFor="email" className="text-sm md:text-base text-gray-700 dark:text-gray-300 transition-colors duration-300">
+                    Email Address <span className="text-red-500">*</span>
+                  </Label>
                   <Input
                     id="email"
                     type="email"
@@ -198,36 +236,42 @@ export default function ContactPage() {
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                     required
-                    className="mt-1"
+                    className="mt-1.5 bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 transition-colors duration-300"
                   />
                 </div>
 
                 <div>
-                  <Label htmlFor="phone">Phone Number</Label>
+                  <Label htmlFor="phone" className="text-sm md:text-base text-gray-700 dark:text-gray-300 transition-colors duration-300">
+                    Phone Number
+                  </Label>
                   <Input
                     id="phone"
                     type="tel"
                     placeholder="+268 7600 0000"
                     value={formData.phone}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    className="mt-1"
+                    className="mt-1.5 bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 transition-colors duration-300"
                   />
                 </div>
 
                 <div>
-                  <Label htmlFor="subject">Subject *</Label>
+                  <Label htmlFor="subject" className="text-sm md:text-base text-gray-700 dark:text-gray-300 transition-colors duration-300">
+                    Subject <span className="text-red-500">*</span>
+                  </Label>
                   <Input
                     id="subject"
                     placeholder="What is this regarding?"
                     value={formData.subject}
                     onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
                     required
-                    className="mt-1"
+                    className="mt-1.5 bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 transition-colors duration-300"
                   />
                 </div>
 
                 <div>
-                  <Label htmlFor="message">Message *</Label>
+                  <Label htmlFor="message" className="text-sm md:text-base text-gray-700 dark:text-gray-300 transition-colors duration-300">
+                    Message <span className="text-red-500">*</span>
+                  </Label>
                   <Textarea
                     id="message"
                     placeholder="Tell us how we can help..."
@@ -235,11 +279,15 @@ export default function ContactPage() {
                     value={formData.message}
                     onChange={(e) => setFormData({ ...formData, message: e.target.value })}
                     required
-                    className="mt-1"
+                    className="mt-1.5 bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 transition-colors duration-300 resize-y"
                   />
                 </div>
 
-                <Button type="submit" className="w-full" disabled={loading}>
+                <Button 
+                  type="submit" 
+                  className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 dark:from-indigo-500 dark:to-purple-500 dark:hover:from-indigo-600 dark:hover:to-purple-600 text-white shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 transition-all duration-300 text-sm md:text-base h-11 md:h-12"
+                  disabled={loading}
+                >
                   {loading ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -253,40 +301,46 @@ export default function ContactPage() {
                   )}
                 </Button>
 
-                <p className="text-xs text-gray-500 text-center">
+                <p className="text-[10px] md:text-xs text-gray-500 dark:text-gray-500 text-center transition-colors duration-300">
                   By submitting, you agree to our Privacy Policy. We'll never share your data.
                 </p>
               </form>
             </div>
 
             {/* FAQ Section */}
-            <div>
-              <div className="mb-6">
-                <h2 className="text-2xl font-bold mb-2">Frequently Asked Questions</h2>
-                <p className="text-gray-600">
+            <div className="mt-8 md:mt-0">
+              <div className="mb-5 md:mb-6">
+                <h2 className="text-2xl sm:text-3xl font-bold mb-2 text-gray-900 dark:text-white transition-colors duration-300">
+                  Frequently Asked Questions
+                </h2>
+                <p className="text-sm md:text-base text-gray-600 dark:text-gray-400 transition-colors duration-300">
                   Find quick answers to common questions about SwaziRent.
                 </p>
               </div>
-              <div className="space-y-4">
+              <div className="space-y-3 md:space-y-4">
                 {faqs.map((faq, index) => (
-                  <Card key={index} className="hover:shadow-md transition-shadow">
-                    <CardContent className="p-4">
-                      <h3 className="font-semibold mb-1 text-sm">{faq.question}</h3>
-                      <p className="text-sm text-gray-600">{faq.answer}</p>
+                  <Card key={index} className="hover:shadow-lg dark:hover:shadow-indigo-500/5 transition-all duration-300 border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900">
+                    <CardContent className="p-4 md:p-5 lg:p-6">
+                      <h3 className="font-semibold text-sm md:text-base mb-1 text-gray-900 dark:text-white transition-colors duration-300">
+                        {faq.question}
+                      </h3>
+                      <p className="text-xs md:text-sm text-gray-600 dark:text-gray-400 leading-relaxed transition-colors duration-300">
+                        {faq.answer}
+                      </p>
                     </CardContent>
                   </Card>
                 ))}
               </div>
 
-              <div className="mt-6 p-4 bg-primary/5 rounded-lg border border-primary/10">
-                <p className="text-sm text-gray-600">
-                  <span className="font-semibold text-primary">Still have questions?</span>{' '}
+              <div className="mt-4 md:mt-6 p-4 md:p-5 bg-indigo-50 dark:bg-indigo-500/10 rounded-lg border border-indigo-100 dark:border-indigo-500/20 transition-colors duration-300">
+                <p className="text-sm md:text-base text-gray-700 dark:text-gray-300 transition-colors duration-300">
+                  <span className="font-semibold text-indigo-600 dark:text-indigo-400">Still have questions?</span>{' '}
                   Reach out to us and we'll be happy to help.
                 </p>
-                <Button variant="link" className="p-0 h-auto text-primary mt-1" asChild>
-                  <Link href="mailto:support@swazirent.com">
+                <Button variant="link" className="p-0 h-auto text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 mt-1 text-sm md:text-base" asChild>
+                  <Link href="mailto:support@swazirent.com" className="flex items-center gap-1">
                     support@swazirent.com
-                    <ArrowRight className="ml-1 h-3 w-3" />
+                    <ArrowRight className="h-3 w-3 md:h-4 md:w-4" />
                   </Link>
                 </Button>
               </div>
@@ -295,51 +349,51 @@ export default function ContactPage() {
         </div>
       </section>
 
-      {/* Office Hours */}
-      <section className="py-12 bg-white">
+      {/* ========== OFFICE HOURS ========== */}
+      <section className="py-10 md:py-16 lg:py-20 bg-white dark:bg-gray-950 transition-colors duration-300 border-y border-gray-100 dark:border-gray-800">
         <div className="container mx-auto px-4">
           <div className="max-w-3xl mx-auto text-center">
-            <Badge className="mb-4 bg-primary/10 text-primary border-primary/20">
+            <Badge className="mb-4 md:mb-6 bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-500/30 px-4 py-1.5 text-xs md:text-sm transition-colors duration-300">
               Office Hours
             </Badge>
-            <div className="grid md:grid-cols-2 gap-8">
-              <div>
-                <h3 className="font-semibold mb-4 flex items-center justify-center gap-2">
-                  <Clock className="h-5 w-5 text-primary" />
+            <div className="grid md:grid-cols-2 gap-6 md:gap-8 lg:gap-12">
+              <div className="bg-gray-50 dark:bg-gray-900/50 rounded-xl p-5 md:p-6 lg:p-8 transition-colors duration-300">
+                <h3 className="font-semibold text-base md:text-lg mb-3 md:mb-4 flex items-center justify-center gap-2 text-gray-900 dark:text-white transition-colors duration-300">
+                  <Clock className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
                   Business Hours
                 </h3>
-                <div className="space-y-2 text-gray-600">
-                  <div className="flex justify-between">
+                <div className="space-y-2 md:space-y-2.5 text-sm md:text-base text-gray-600 dark:text-gray-400 transition-colors duration-300">
+                  <div className="flex justify-between items-center">
                     <span>Monday - Friday</span>
-                    <span className="font-medium">9:00 AM - 5:00 PM</span>
+                    <span className="font-medium text-gray-900 dark:text-white transition-colors duration-300">9:00 AM - 5:00 PM</span>
                   </div>
-                  <div className="flex justify-between">
+                  <div className="flex justify-between items-center">
                     <span>Saturday</span>
-                    <span className="font-medium">10:00 AM - 2:00 PM</span>
+                    <span className="font-medium text-gray-900 dark:text-white transition-colors duration-300">10:00 AM - 2:00 PM</span>
                   </div>
-                  <div className="flex justify-between">
+                  <div className="flex justify-between items-center">
                     <span>Sunday</span>
-                    <span className="font-medium text-gray-400">Closed</span>
+                    <span className="font-medium text-gray-400 dark:text-gray-600 transition-colors duration-300">Closed</span>
                   </div>
                 </div>
               </div>
-              <div>
-                <h3 className="font-semibold mb-4 flex items-center justify-center gap-2">
-                  <CheckCircle className="h-5 w-5 text-green-500" />
+              <div className="bg-gray-50 dark:bg-gray-900/50 rounded-xl p-5 md:p-6 lg:p-8 transition-colors duration-300">
+                <h3 className="font-semibold text-base md:text-lg mb-3 md:mb-4 flex items-center justify-center gap-2 text-gray-900 dark:text-white transition-colors duration-300">
+                  <CheckCircle className="h-5 w-5 text-emerald-500 dark:text-emerald-400" />
                   Response Times
                 </h3>
-                <div className="space-y-2 text-gray-600">
-                  <div className="flex justify-between">
+                <div className="space-y-2 md:space-y-2.5 text-sm md:text-base text-gray-600 dark:text-gray-400 transition-colors duration-300">
+                  <div className="flex justify-between items-center">
                     <span>Email</span>
-                    <span className="font-medium text-green-600">Within 24 hours</span>
+                    <span className="font-medium text-emerald-600 dark:text-emerald-400 transition-colors duration-300">Within 24 hours</span>
                   </div>
-                  <div className="flex justify-between">
+                  <div className="flex justify-between items-center">
                     <span>WhatsApp</span>
-                    <span className="font-medium text-green-600">Within 2 hours</span>
+                    <span className="font-medium text-emerald-600 dark:text-emerald-400 transition-colors duration-300">Within 2 hours</span>
                   </div>
-                  <div className="flex justify-between">
+                  <div className="flex justify-between items-center">
                     <span>Phone</span>
-                    <span className="font-medium text-green-600">Immediate</span>
+                    <span className="font-medium text-emerald-600 dark:text-emerald-400 transition-colors duration-300">Immediate</span>
                   </div>
                 </div>
               </div>
@@ -348,23 +402,88 @@ export default function ContactPage() {
         </div>
       </section>
 
-      {/* CTA Section */}
-      <section className="py-16 bg-linear-to-r from-primary-600 to-primary-700 text-white">
-        <div className="container mx-auto px-4 text-center">
-          <h2 className="text-3xl font-bold mb-4">Ready to Get Started?</h2>
-          <p className="text-xl mb-8 opacity-90 max-w-2xl mx-auto">
+      {/* ========== TRUST INDICATORS ========== */}
+      <section className="py-10 md:py-16 bg-gray-50 dark:bg-gray-900/50 transition-colors duration-300">
+        <div className="container mx-auto px-4">
+          <div className="max-w-4xl mx-auto">
+            <div className="text-center mb-6 md:mb-8">
+              <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-white transition-colors duration-300">
+                Why Choose SwaziRent?
+              </h2>
+            </div>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
+              <div className="flex items-center gap-3 md:gap-4 p-3 md:p-4 bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-100 dark:border-gray-800 transition-colors duration-300">
+                <div className="p-2 bg-indigo-100 dark:bg-indigo-500/10 rounded-full shrink-0">
+                  <Shield className="h-4 w-4 md:h-5 md:w-5 text-indigo-600 dark:text-indigo-400" />
+                </div>
+                <div>
+                  <p className="font-medium text-xs md:text-sm text-gray-900 dark:text-white transition-colors duration-300">Verified Listings</p>
+                  <p className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400 transition-colors duration-300">Every property vetted</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 md:gap-4 p-3 md:p-4 bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-100 dark:border-gray-800 transition-colors duration-300">
+                <div className="p-2 bg-emerald-100 dark:bg-emerald-500/10 rounded-full shrink-0">
+                  <Zap className="h-4 w-4 md:h-5 md:w-5 text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <div>
+                  <p className="font-medium text-xs md:text-sm text-gray-900 dark:text-white transition-colors duration-300">Fast Response</p>
+                  <p className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400 transition-colors duration-300">Within 24 hours</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 md:gap-4 p-3 md:p-4 bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-100 dark:border-gray-800 transition-colors duration-300 sm:col-span-2 lg:col-span-1">
+                <div className="p-2 bg-purple-100 dark:bg-purple-500/10 rounded-full shrink-0">
+                  <Users className="h-4 w-4 md:h-5 md:w-5 text-purple-600 dark:text-purple-400" />
+                </div>
+                <div>
+                  <p className="font-medium text-xs md:text-sm text-gray-900 dark:text-white transition-colors duration-300">Community Trust</p>
+                  <p className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400 transition-colors duration-300">1,200+ happy renters</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ========== CTA SECTION ========== */}
+      <section className="relative overflow-hidden py-12 md:py-20 lg:py-24">
+        {/* Background */}
+        <div className="absolute inset-0 bg-gradient-to-br from-indigo-600 to-purple-700 dark:from-indigo-700 dark:to-purple-800" />
+        
+        {/* Gradient orbs */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div 
+            className="absolute -top-[40%] -right-[20%] w-[70%] h-[70%] rounded-full"
+            style={{
+              background: 'radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 70%)',
+              filter: 'blur(80px)',
+            }}
+          />
+          <div 
+            className="absolute -bottom-[30%] -left-[20%] w-[60%] h-[60%] rounded-full"
+            style={{
+              background: 'radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%)',
+              filter: 'blur(80px)',
+            }}
+          />
+        </div>
+
+        <div className="container mx-auto px-4 text-center relative z-10">
+          <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold mb-3 md:mb-4 text-white">
+            Ready to Get Started?
+          </h2>
+          <p className="text-base sm:text-lg md:text-xl mb-6 md:mb-8 text-white/90 max-w-2xl mx-auto px-2">
             Join the SwaziRent community today. Find your next home or list your property.
           </p>
-          <div className="flex flex-wrap justify-center gap-4">
-            <Button size="lg" variant="secondary" asChild>
+          <div className="flex flex-wrap justify-center gap-3 md:gap-4">
+            <Button size="lg" variant="secondary" asChild className="bg-white text-indigo-700 hover:bg-gray-100 dark:bg-white/10 dark:text-white dark:hover:bg-white/20 shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 transition-all duration-300 text-sm md:text-base h-11 md:h-12 px-5 md:px-8">
               <Link href="/search">
-                <Home className="mr-2 h-5 w-5" />
+                <Home className="mr-2 h-4 w-4 md:h-5 md:w-5" />
                 Find a Home
               </Link>
             </Button>
-            <Button size="lg" variant="outline" className="bg-white/10 text-white border-white/20 hover:bg-white/20" asChild>
+            <Button size="lg" variant="outline" className="bg-white/10 text-white border-white/20 hover:bg-white/20 hover:border-white/30 shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 transition-all duration-300 text-sm md:text-base h-11 md:h-12 px-5 md:px-8" asChild>
               <Link href="/dashboard/landlord/add-property">
-                <Building className="mr-2 h-5 w-5" />
+                <Building className="mr-2 h-4 w-4 md:h-5 md:w-5" />
                 List Your Property
               </Link>
             </Button>
