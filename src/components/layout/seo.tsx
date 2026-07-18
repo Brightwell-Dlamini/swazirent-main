@@ -8,10 +8,10 @@ interface SEOProps {
 }
 
 export function SEO({
-  title = 'SwaziRent - Find Your Next Home in Eswatini',
+  title = 'Ekhaya - Find Your Next Home in Eswatini',
   description = 'Search verified rentals in Manzini, Mbabane, and beyond. No tussle.',
   image = '/og-image.jpg',
-  url = 'https://swazirent.com',
+  url = 'https://ekhaya.com',
 }: SEOProps) {
   return (
     <Head>

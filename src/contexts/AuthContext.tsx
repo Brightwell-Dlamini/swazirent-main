@@ -53,8 +53,8 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // Cache keys
-const AUTH_CACHE_KEY = 'swazirent_auth_cache';
-const PROFILE_CACHE_KEY = 'swazirent_profile_cache';
+const AUTH_CACHE_KEY = 'ekhaya_auth_cache';
+const PROFILE_CACHE_KEY = 'ekhaya_profile_cache';
 
 interface AuthCache {
   user: {

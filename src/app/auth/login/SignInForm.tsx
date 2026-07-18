@@ -52,7 +52,7 @@ export default function SignInForm() {
               Welcome Back
             </CardTitle>
             <CardDescription className="text-center">
-              Sign in to your SwaziRent account
+              Sign in to your Ekhaya account
             </CardDescription>
           </CardHeader>
           <CardContent>

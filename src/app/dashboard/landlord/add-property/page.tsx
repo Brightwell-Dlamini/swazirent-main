@@ -984,7 +984,7 @@ export default function AddPropertyPage() {
             </Link>
           </Button>
           <h1 className="text-3xl font-bold">Add New Property</h1>
-          <p className="text-gray-600">List your property on SwaziRent</p>
+          <p className="text-gray-600">List your property on Ekhaya</p>
         </div>
         <Card>
           <CardContent className="p-12 text-center">
@@ -1018,7 +1018,7 @@ export default function AddPropertyPage() {
             </Link>
           </Button>
           <h1 className="text-3xl font-bold">Add New Property</h1>
-          <p className="text-gray-600">List your property on SwaziRent</p>
+          <p className="text-gray-600">List your property on Ekhaya</p>
         </div>
         <Card>
           <CardContent className="p-12 text-center">
@@ -1050,7 +1050,7 @@ export default function AddPropertyPage() {
           </Link>
         </Button>
         <h1 className="text-3xl font-bold">Add New Property</h1>
-        <p className="text-gray-600">List your property on SwaziRent</p>
+        <p className="text-gray-600">List your property on Ekhaya</p>
       </div>
 
       <div className="mb-8">

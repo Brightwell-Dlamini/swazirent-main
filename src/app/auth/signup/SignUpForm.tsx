@@ -233,7 +233,7 @@ export default function SignUpForm() {
               Create an Account
             </CardTitle>
             <CardDescription className="text-center">
-              Join SwaziRent to find or list properties
+              Join Ekhaya to find or list properties
             </CardDescription>
           </CardHeader>
           <CardContent>

@@ -80,7 +80,7 @@ export default function AboutPage() {
         <div className="container mx-auto px-4">
           <div className="max-w-4xl mx-auto text-center">
             <Badge className="mb-4 bg-primary/10 text-primary border-primary/20 px-4 py-1">
-              About SwaziRent
+              About Ekhaya
             </Badge>
             <h1 className="text-4xl md:text-5xl font-bold mb-4">
               Your Trusted Partner in
@@ -129,7 +129,7 @@ export default function AboutPage() {
               </h2>
               <div className="space-y-4 text-gray-600 leading-relaxed">
                 <p>
-                  SwaziRent was born from a simple idea: finding a home in Eswatini 
+                  Ekhaya was born from a simple idea: finding a home in Eswatini 
                   should be easy, not stressful. We saw too many people struggling 
                   with scams, unreliable listings, and outdated processes.
                 </p>
@@ -199,7 +199,7 @@ export default function AboutPage() {
             </Badge>
             <h2 className="text-3xl font-bold mb-4">What We Stand For</h2>
             <p className="text-gray-600 max-w-2xl mx-auto">
-              These core values guide everything we do at SwaziRent.
+              These core values guide everything we do at Ekhaya.
             </p>
           </div>
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-5xl mx-auto">
@@ -228,9 +228,9 @@ export default function AboutPage() {
         <div className="container mx-auto px-4">
           <div className="text-center mb-12">
             <Badge className="mb-4 bg-primary/10 text-primary border-primary/20">
-              Why SwaziRent
+              Why Ekhaya
             </Badge>
-            <h2 className="text-3xl font-bold mb-4">Why Choose SwaziRent?</h2>
+            <h2 className="text-3xl font-bold mb-4">Why Choose Ekhaya?</h2>
             <p className="text-gray-600 max-w-2xl mx-auto">
               We make renting simple, safe, and stress-free for everyone in Eswatini.
             </p>

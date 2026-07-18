@@ -332,7 +332,7 @@ export function Header() {
           <Link
             href="/"
             className="flex items-center space-x-2 group relative"
-            aria-label="SwaziRent Home"
+            aria-label="Ekhaya Home"
           >
             <div className="relative">
               <Home className="h-6 w-6 text-primary-600 dark:text-primary-400 transition-transform duration-300 group-hover:scale-110 group-hover:rotate-[-5deg]" />
@@ -344,7 +344,7 @@ export function Header() {
               />
             </div>
             <span className="font-bold text-xl text-gray-900 dark:text-white group-hover:text-primary-600 dark:group-hover:text-primary-400 transition-colors">
-              SwaziRent
+              Ekhaya
             </span>
           </Link>
 
@@ -680,7 +680,7 @@ export function Header() {
                       <Home className="h-5 w-5 text-primary-600 dark:text-primary-400 transition-transform group-hover:scale-110" />
                     </div>
                     <span className="font-bold text-lg text-gray-900 dark:text-white group-hover:text-primary-600 dark:group-hover:text-primary-400 transition-colors">
-                      SwaziRent
+                      Ekhaya
                     </span>
                   </Link>
                   <Button
@@ -917,7 +917,7 @@ export function Header() {
             <AlertDialogDescription className="space-y-4">
               <p>
                 As a renter, you can search for properties and manage your rentals.
-                To list properties on SwaziRent, you need to upgrade to a landlord account.
+                To list properties on Ekhaya, you need to upgrade to a landlord account.
               </p>
               <div className="bg-purple-50 dark:bg-purple-950/50 p-4 rounded-lg space-y-2">
                 <p className="font-semibold text-purple-900 dark:text-purple-100 flex items-center">

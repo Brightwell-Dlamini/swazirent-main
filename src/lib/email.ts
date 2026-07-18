@@ -27,7 +27,7 @@ export async function sendEmail({
 
     try {
         const { data, error } = await resend.emails.send({
-            from: 'SwaziRent <noreply@yourdomain.com>', // Update this with your verified domain
+            from: 'Ekhaya <noreply@yourdomain.com>', // Update this with your verified domain
             to: [to],
             subject: subject,
             html: html,

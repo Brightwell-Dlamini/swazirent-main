@@ -146,7 +146,7 @@ export default function UpgradeForm() {
               <CardTitle>Become a Landlord</CardTitle>
             </div>
             <CardDescription>
-              Upgrade your account to list properties on SwaziRent
+              Upgrade your account to list properties on Ekhaya
             </CardDescription>
           </CardHeader>
           <CardContent>

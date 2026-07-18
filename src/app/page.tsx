@@ -473,7 +473,7 @@ export default function HomePage() {
             <div>
               <div className="flex items-center space-x-2 mb-4">
                 <HomeIcon className="h-6 w-6" />
-                <span className="font-bold text-xl">SwaziRent</span>
+                <span className="font-bold text-xl">Ekhaya</span>
               </div>
               <p className="text-gray-400 text-sm">
                 Find your next home in Eswatini. Fast, easy, and verified.
@@ -547,7 +547,7 @@ export default function HomePage() {
           </div>
           <div className="border-t border-gray-800 mt-8 pt-8 text-center text-gray-400 text-sm">
             <p>
-              &copy; {new Date().getFullYear()} SwaziRent. All rights reserved.
+              &copy; {new Date().getFullYear()} Ekhaya. All rights reserved.
             </p>
           </div>
         </div>

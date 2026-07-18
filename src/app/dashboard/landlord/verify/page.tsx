@@ -374,7 +374,7 @@ export default function VerificationPage() {
             </p>
           </div>
           <Button variant="outline" asChild className="w-full">
-            <a href="mailto:support@swazirent.com">Contact Support</a>
+            <a href="mailto:support@ekhaya.com">Contact Support</a>
           </Button>
         </CardContent>
       </Card>

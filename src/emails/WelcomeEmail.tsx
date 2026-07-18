@@ -20,16 +20,16 @@ export function WelcomeEmail({ name, userType }: WelcomeEmailProps) {
   return (
     <Html>
       <Head />
-      <Preview>Welcome to SwaziRent! 🏠</Preview>
+      <Preview>Welcome to Ekhaya! 🏠</Preview>
       <Tailwind>
         <Body className="bg-gray-50 font-sans">
           <Container className="bg-white p-8 rounded-lg shadow-lg">
             <Heading className="text-2xl font-bold text-center mb-4">
-              Welcome to SwaziRent!
+              Welcome to Ekhaya!
             </Heading>
             <Text className="text-gray-700 mb-4">Hi {name},</Text>
             <Text className="text-gray-700 mb-4">
-              Thank you for joining SwaziRent, Eswatini&apos;s most trusted
+              Thank you for joining Ekhaya, Eswatini&apos;s most trusted
               rental platform. We&apos;re excited to help you{' '}
               {userType === 'landlord'
                 ? 'find great tenants'
@@ -43,7 +43,7 @@ export function WelcomeEmail({ name, userType }: WelcomeEmailProps) {
                   a few minutes.
                 </Text>
                 <Button
-                  href="https://swazirent.com/dashboard/landlord/add-property"
+                  href="https://ekhaya.com/dashboard/landlord/add-property"
                   className="bg-primary text-white px-6 py-3 rounded-lg"
                 >
                   List Your Property
@@ -55,7 +55,7 @@ export function WelcomeEmail({ name, userType }: WelcomeEmailProps) {
                   Start searching for your perfect home today.
                 </Text>
                 <Button
-                  href="https://swazirent.com/search"
+                  href="https://ekhaya.com/search"
                   className="bg-primary text-white px-6 py-3 rounded-lg"
                 >
                   Search Properties

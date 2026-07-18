@@ -9,7 +9,7 @@ import { Toaster } from 'sonner';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'SwaziRent - Find Your Next Home in Eswatini',
+  title: 'Ekhaya - Find Your Next Home in Eswatini',
   description:
     'Search verified rentals in Manzini, Mbabane, and beyond. No tussle.',
 };
