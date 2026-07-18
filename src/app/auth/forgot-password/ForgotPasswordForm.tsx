@@ -42,7 +42,9 @@ export default function ForgotPasswordForm() {
       forgotPasswordSchema.parse({ email });
     } catch (err) {
       if (err instanceof z.ZodError) {
-        setValidationError(err.errors[0].message);
+        // Fix: Access errors from the first issue
+        const firstError = err.issues[0];
+        setValidationError(firstError?.message || 'Invalid email');
         setIsLoading(false);
         return;
       }
