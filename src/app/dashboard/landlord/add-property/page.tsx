@@ -42,7 +42,7 @@ const CITIES = [
   'Hlatikulu', 'Mhlume', 'Simunye'
 ];
 
-const PROPERTY_TYPES: PropertyType[] = ['house', 'flat/apartment',  'backroom','shared', 'other'];
+const PROPERTY_TYPES: PropertyType[] = ['house', 'flat/apartment', 'backrooms', 'shared', 'other'];
 
 // Eswatini-specific amenities
 const ESWATINI_AMENITIES = [
@@ -772,7 +772,7 @@ export default function AddPropertyPage() {
             <div>
               <Label>Amenities</Label>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-2">
-                {AMENITIES.map((amenity) => (
+                {ESWATINI_AMENITIES.map((amenity) => (
                   <div key={amenity} className="flex items-center space-x-2">
                     <Checkbox
                       id={amenity}

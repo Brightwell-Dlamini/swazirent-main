@@ -42,7 +42,7 @@ const CITIES = [
 ];
 
 const PROPERTY_TYPES: PropertyType[] = [
-  'house', 'apartment', 'townhouse', 'backrooms', 'other'
+  'house', 'flat/apartment', 'shared', 'backrooms', 'other'
 ];
 
 const AMENITIES = [

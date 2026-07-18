@@ -75,7 +75,7 @@ const ESWATINI_AMENITIES = [
   
 ];
 
-const PROPERTY_TYPES: PropertyType[] = ['house', 'flat/apartment',  'backroom','shared', 'other'];
+const PROPERTY_TYPES: PropertyType[] = ['house', 'flat/apartment',  'backrooms','shared', 'other'];
 
 const FILTER_PRESETS = [
   { name: 'Under E2000', filters: { maxPrice: 2000 } },
@@ -224,8 +224,8 @@ const FilterContent = memo(({
     <div className="flex items-center space-x-2">
       <Checkbox
         id="furnished"
-        checked={filters.furnished}
-        onCheckedChange={(checked) => onFilterChange('furnished', checked === true)}
+        checked={filters.fitted}
+        onCheckedChange={(checked) => onFilterChange('fitted', checked === true)}
       />
       <Label htmlFor="furnished">Furnished Only</Label>
     </div>
@@ -296,7 +296,7 @@ export default function SearchContent() {
     bedrooms: searchParams.get('bedrooms') || 'any',
     propertyType: (searchParams.getAll('propertyType') as PropertyType[]) || [],
     amenities: searchParams.getAll('amenities') || [],
-    furnished: searchParams.get('furnished') === 'true',
+    fitted: searchParams.get('fitted') === 'true',
   }));
 
   const [searchInput, setSearchInput] = useState(filters.keyword);
@@ -328,7 +328,7 @@ export default function SearchContent() {
     if (filters.bedrooms !== 'any') count++;
     count += filters.propertyType.length;
     count += filters.amenities.length;
-    if (filters.furnished) count++;
+    if (filters.fitted) count++;
     setActiveFilterCount(count);
   }, [filters]);
 
@@ -428,7 +428,7 @@ export default function SearchContent() {
         );
       }
 
-      if (deferredFilters.furnished) {
+      if (deferredFilters.fitted) {
         filtered = filtered.filter(p => p.is_furnished === true);
       }
 
@@ -469,7 +469,7 @@ export default function SearchContent() {
     if (filters.minPrice > 0) params.set('minPrice', filters.minPrice.toString());
     if (filters.maxPrice < 10000) params.set('maxPrice', filters.maxPrice.toString());
     if (filters.bedrooms !== 'any') params.set('bedrooms', filters.bedrooms);
-    if (filters.furnished) params.set('furnished', 'true');
+    if (filters.fitted) params.set('furnished', 'true');
     if (sortBy !== 'newest') params.set('sort', sortBy);
     if (page > 1) params.set('page', page.toString());
     filters.propertyType.forEach(type => params.append('propertyType', type));
@@ -507,7 +507,7 @@ export default function SearchContent() {
       bedrooms: 'any',
       propertyType: [],
       amenities: [],
-      furnished: false,
+      fitted: false,
     });
     setSearchInput('');
     setPage(1);
@@ -567,7 +567,7 @@ export default function SearchContent() {
       filters.bedrooms !== 'any' ||
       filters.propertyType.length > 0 ||
       filters.amenities.length > 0 ||
-      filters.furnished
+      filters.fitted
     );
   }, [filters]);
 
@@ -805,12 +805,12 @@ export default function SearchContent() {
                   </button>
                 </Badge>
               ))}
-              {filters.furnished && (
+              {filters.fitted && (
                 <Badge variant="secondary" className="px-3 py-1">
-                  Furnished
+                  Fully Fitted
                   <button
                     className="ml-2 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-400 rounded-full"
-                    onClick={() => handleFilterChange('furnished', false)}
+                    onClick={() => handleFilterChange('fitted', false)}
                   >
                     ×
                   </button>
