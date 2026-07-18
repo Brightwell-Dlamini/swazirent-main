@@ -1,6 +1,8 @@
 // src/app/layout.tsx
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
+// Ignore TypeScript complaints about side-effect CSS import
+// @ts-ignore
 import './globals.css';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { AuthProvider } from '@/contexts/AuthContext';
