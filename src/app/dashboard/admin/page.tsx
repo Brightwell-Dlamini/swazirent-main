@@ -124,7 +124,7 @@ import {
   Droplets,
   Umbrella,
   Leaf,
-  Trees, // ← Changed from 'Tree' to 'Trees'
+  Trees,
   Flower,
   Mountain,
   Waves,
@@ -140,6 +140,8 @@ import {
 } from 'lucide-react';
 
 // ===== TYPES =====
+
+type PlatformHealthStatus = 'healthy' | 'warning' | 'critical';
 
 interface UserProfile {
   id: string;
@@ -219,7 +221,7 @@ interface AdminStats {
   propertyTypeDistribution: { type: string; count: number }[];
   userActivityHeatmap: { date: string; active: number }[];
   platformHealth: {
-    status: 'healthy' | 'warning' | 'critical';
+    status: PlatformHealthStatus;
     uptime: number;
     responseTime: number;
     errorRate: number;
@@ -336,7 +338,12 @@ export default function SuperAdminDashboard() {
         ...bookingStats,
         ...revenueStats,
         ...analyticsStats,
-        platformHealth,
+        platformHealth: {
+          status: platformHealth.status as PlatformHealthStatus,
+          uptime: platformHealth.uptime,
+          responseTime: platformHealth.responseTime,
+          errorRate: platformHealth.errorRate,
+        },
         topPerformingCities: topCities,
         propertyTypeDistribution: propertyTypes,
         userActivityHeatmap: activityHeatmap,
@@ -494,15 +501,19 @@ export default function SuperAdminDashboard() {
       await supabase.from('properties').select('id', { count: 'exact', head: true });
       const responseTime = Date.now() - startTime;
       
+      let status: PlatformHealthStatus = 'healthy';
+      if (responseTime >= 500) status = 'warning';
+      if (responseTime >= 1000) status = 'critical';
+      
       return {
-        status: responseTime < 200 ? 'healthy' : responseTime < 500 ? 'warning' : 'critical',
+        status,
         uptime: 99.95,
         responseTime,
         errorRate: 0.5,
       };
     } catch {
       return {
-        status: 'critical',
+        status: 'critical' as PlatformHealthStatus,
         uptime: 99.9,
         responseTime: 1000,
         errorRate: 2.5,
