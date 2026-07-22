@@ -25,12 +25,9 @@ import {
   BarChart,
   Camera,
   AlertCircle,
-  TrendingUp,
-  TrendingDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useLandlordProperties } from '@/hooks/useLandlordProperties';
-import { usePriceInsight } from '@/hooks/usePriceInsight';
 
 interface PropertyWithPhotos extends Property {
   photos: PropertyPhoto[];
@@ -54,15 +51,6 @@ export default function LandlordPropertyManagePage() {
   const { deleteProperty, updateStatus } = useLandlordProperties({
     autoFetch: false,
     userId: user?.id,
-  });
-
-  // Use price insight hook
-  const { priceInsight, checkingPrice } = usePriceInsight({
-    price: property?.price || 0,
-    city: property?.location_city || '',
-    propertyType: property?.property_type || '',
-    bedrooms: property?.bedrooms || 0,
-    excludePropertyId: propertyId,
   });
 
   // Check authentication
@@ -284,21 +272,6 @@ export default function LandlordPropertyManagePage() {
                     E{property.price.toLocaleString()}
                   </p>
                 </div>
-                {priceInsight && !checkingPrice && priceInsight.position !== 'average' && (
-                  <div
-                    className={`text-xs ${
-                      priceInsight.position === 'below'
-                        ? 'text-blue-600'
-                        : 'text-yellow-600'
-                    }`}
-                  >
-                    {priceInsight.position === 'below' ? (
-                      <TrendingDown className="h-5 w-5" />
-                    ) : (
-                      <TrendingUp className="h-5 w-5" />
-                    )}
-                  </div>
-                )}
               </div>
             </CardContent>
           </Card>
@@ -328,31 +301,6 @@ export default function LandlordPropertyManagePage() {
                         <p className="font-semibold text-lg">
                           E{property.price.toLocaleString()}/month
                         </p>
-                        {priceInsight && !checkingPrice && (
-                          <div
-                            className={`text-sm mt-1 ${
-                              priceInsight.position === 'below'
-                                ? 'text-blue-600'
-                                : priceInsight.position === 'above'
-                                ? 'text-yellow-600'
-                                : 'text-green-600'
-                            }`}
-                          >
-                            {priceInsight.position === 'below' && (
-                              <span>
-                                ↓ {priceInsight.diff}% below Eswatini market average
-                              </span>
-                            )}
-                            {priceInsight.position === 'above' && (
-                              <span>
-                                ↑ {priceInsight.diff}% above Eswatini market average
-                              </span>
-                            )}
-                            {priceInsight.position === 'average' && (
-                              <span>✓ Within Eswatini market range</span>
-                            )}
-                          </div>
-                        )}
                       </div>
                       <div>
                         <p className="text-sm text-gray-500">Property Type</p>
@@ -498,81 +446,6 @@ export default function LandlordPropertyManagePage() {
               <div className="space-y-6">
                 <Card>
                   <CardHeader>
-                    <CardTitle>Market Comparison</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {priceInsight && !checkingPrice ? (
-                      <div className="space-y-4">
-                        <p className="text-sm text-gray-600">
-                          Based on {priceInsight.count} similar {property.property_type}s in {property.location_city}, Eswatini
-                        </p>
-
-                        <div className="space-y-2">
-                          <div className="flex justify-between text-sm">
-                            <span className="text-gray-500">Market range:</span>
-                            <span className="font-medium">
-                              E{priceInsight.min.toLocaleString()} - E
-                              {priceInsight.max.toLocaleString()}
-                            </span>
-                          </div>
-                          <div className="flex justify-between text-sm">
-                            <span className="text-gray-500">Average:</span>
-                            <span className="font-medium">
-                              E
-                              {Math.round(
-                                priceInsight.average
-                              ).toLocaleString()}
-                            </span>
-                          </div>
-                          <div className="flex justify-between text-sm">
-                            <span className="text-gray-500">Your price:</span>
-                            <span
-                              className={`font-medium ${
-                                priceInsight.position === 'below'
-                                  ? 'text-blue-600'
-                                  : priceInsight.position === 'above'
-                                  ? 'text-yellow-600'
-                                  : 'text-green-600'
-                              }`}
-                            >
-                              E{property.price.toLocaleString()}
-                              {priceInsight.position !== 'average' && (
-                                <span className="ml-1">
-                                  (
-                                  {priceInsight.position === 'below'
-                                    ? '-'
-                                    : '+'}
-                                  {priceInsight.diff}%)
-                                </span>
-                              )}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="pt-2">
-                          <Button
-                            variant="link"
-                            className="p-0 h-auto text-sm"
-                            asChild
-                          >
-                            <Link
-                              href={`/dashboard/landlord/edit-property/${property.id}`}
-                            >
-                              Adjust pricing →
-                            </Link>
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-sm text-gray-500">
-                        Not enough similar properties in Eswatini to compare pricing.
-                      </p>
-                    )}
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
                     <CardTitle>Listing Performance</CardTitle>
                   </CardHeader>
                   <CardContent>
@@ -674,7 +547,7 @@ export default function LandlordPropertyManagePage() {
                     Analytics Coming Soon
                   </h3>
                   <p className="text-gray-500">
-                    We&apos;re working on bringing you detailed insights about
+                    We're working on bringing you detailed insights about
                     your listing performance in Eswatini.
                   </p>
                 </div>
