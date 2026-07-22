@@ -1,14 +1,13 @@
 // src/app/dashboard/landlord/page.tsx
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
 import { useVerification } from '@/hooks/useVerification';
-import { supabase } from '@/lib/supabase';
-import { Property, PropertyPhoto } from '@/types/property';
+import { useLandlordProperties } from '@/hooks/useLandlordProperties';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -48,80 +47,63 @@ import {
   Loader2,
   Clock,
   AlertCircle,
-  TrendingUp,
-  TrendingDown,
   Building,
   Shield,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
+import { StatsSkeleton, PropertyTableSkeleton } from '@/components/landlord/PropertySkeleton';
+import { Property, PropertyPhoto } from '@/types/property';
 
-// Types
 interface PropertyWithPhotos extends Property {
   photos: PropertyPhoto[];
 }
 
-// Helper to get primary photo
 const getPrimaryPhoto = (photos?: PropertyPhoto[]) => {
   if (!photos || photos.length === 0) return null;
   return [...photos].sort((a, b) => a.display_order - b.display_order)[0];
-};
-
-// Helper to extract file path from Supabase URL
-const extractFilePathFromUrl = (url: string): string | null => {
-  try {
-    const urlObj = new URL(url);
-    const pathParts = urlObj.pathname.split('/');
-    const publicIndex = pathParts.indexOf('public');
-    if (publicIndex !== -1) {
-      return pathParts.slice(publicIndex + 1).join('/');
-    }
-    const bucketIndex = pathParts.indexOf('property-photos');
-    if (bucketIndex !== -1) {
-      return pathParts.slice(bucketIndex + 1).join('/');
-    }
-    return null;
-  } catch {
-    return null;
-  }
 };
 
 export default function LandlordDashboard() {
   const { user, userType, isLoading, isInitialized } = useAuth();
   const { status, isLandlordVerified, isLandlordPending, isLandlordRejected, refreshVerification } = useVerification();
   const router = useRouter();
-  const [properties, setProperties] = useState<PropertyWithPhotos[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({
-    total: 0,
-    active: 0,
-    rented: 0,
-    pending: 0,
-    rejected: 0,
-    totalViews: 0,
-  });
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [propertyToDelete, setPropertyToDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [showVerificationBanner, setShowVerificationBanner] = useState(true);
+  
+  const verificationChecked = useRef(false);
+  
+  const { properties, loading, stats, deleteProperty, updateStatus, fetchProperties } = useLandlordProperties({
+    autoFetch: false,
+    userId: user?.id,
+  });
 
-  // REFS TO PREVENT INFINITE LOOPS AND RE-RUNS
-  const hasCheckedVerification = useRef(false);
-  const hasFetchedProperties = useRef(false);
-
-  // Check verification status - ONLY ONCE
+  // Check verification status - only once
   useEffect(() => {
     if (!user || userType !== 'landlord') return;
-    if (hasCheckedVerification.current) return;
-    if (!isLandlordPending) return;
+    if (verificationChecked.current) return;
+    if (!isLandlordPending) {
+      verificationChecked.current = true;
+      return;
+    }
     
-    hasCheckedVerification.current = true;
+    verificationChecked.current = true;
     refreshVerification();
-  }, [user, userType, isLandlordPending]); // ← refreshVerification REMOVED from deps
+  }, [user, userType, isLandlordPending, refreshVerification]);
+
+  // Fetch properties when user is ready
+  useEffect(() => {
+    if (!isInitialized) return;
+    if (!user || userType !== 'landlord') {
+      return;
+    }
+    fetchProperties();
+  }, [user, userType, isInitialized, fetchProperties]);
 
   // Redirect if not authenticated or not a landlord
   useEffect(() => {
-    // Only redirect after initialization is complete
     if (!isInitialized || isLoading) return;
 
     if (!user) {
@@ -146,193 +128,45 @@ export default function LandlordDashboard() {
     }
   }, [user, userType, isLoading, isInitialized, router]);
 
-  const fetchProperties = useCallback(async () => {
-    if (!user || userType !== 'landlord') {
-      setLoading(false);
-      return;
-    }
+  const handleDeleteClick = (propertyId: string) => {
+    setPropertyToDelete(propertyId);
+    setDeleteDialogOpen(true);
+  };
 
-    try {
-      setLoading(true);
-
-      const { data, error } = await supabase
-        .from('properties')
-        .select(`
-          *,
-          landlord:profiles!properties_landlord_id_fkey (
-            full_name,
-            phone,
-            is_verified
-          ),
-          photos:property_photos (
-            id,
-            photo_url,
-            caption,
-            display_order,
-            created_at
-          )
-        `)
-        .eq('landlord_id', user.id)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      const transformedData: PropertyWithPhotos[] = (data || []).map((item: any) => ({
-        ...item,
-        landlord: item.landlord || undefined,
-        photos: item.photos || [],
-      }));
-
-      setProperties(transformedData || []);
-
-      const total = transformedData.length;
-      const active = transformedData.filter((p) => p.status === 'active').length;
-      const rented = transformedData.filter((p) => p.status === 'rented').length;
-      const pending = transformedData.filter((p) => p.status === 'pending').length;
-      const rejected = transformedData.filter((p) => p.status === 'rejected').length;
-      const totalViews = transformedData.reduce((sum, p) => sum + (p.views || 0), 0);
-
-      setStats({ total, active, rented, pending, rejected, totalViews });
-    } catch (error) {
-      console.error('Error fetching properties:', error);
-      toast.error('Failed to load properties');
-    } finally {
-      setLoading(false);
-    }
-  }, [user]); // ← ONLY user, NOT userType
-
-  // Fetch properties - ONLY ONCE
-  useEffect(() => {
-    // Only proceed after initialization is complete
-    if (!isInitialized) return;
-    
-    if (!user || userType !== 'landlord') {
-      setLoading(false);
-      return;
-    }
-    
-    // Skip if already fetched
-    if (hasFetchedProperties.current) return;
-    
-    hasFetchedProperties.current = true;
-    fetchProperties();
-  }, [user, userType, isInitialized]); // ← fetchProperties REMOVED from deps
-
-  // Reset fetch flag when user changes (e.g., signs out and back in)
-  useEffect(() => {
-    if (!user) {
-      hasFetchedProperties.current = false;
-      hasCheckedVerification.current = false;
-    }
-  }, [user]);
-
-  async function deletePropertyWithPhotos(propertyId: string) {
-    try {
-      const { data: photos, error: fetchError } = await supabase
-        .from('property_photos')
-        .select('photo_url')
-        .eq('property_id', propertyId);
-
-      if (fetchError) throw fetchError;
-
-      if (photos && photos.length > 0) {
-        const filePaths = photos
-          .map((p) => extractFilePathFromUrl(p.photo_url))
-          .filter((path): path is string => path !== null);
-
-        if (filePaths.length > 0) {
-          const { error: storageError } = await supabase.storage
-            .from('property-photos')
-            .remove(filePaths);
-
-          if (storageError) {
-            console.error('Error deleting photos from storage:', storageError);
-            toast.warning('Some photos could not be deleted from storage');
-          }
-        }
-      }
-
-      const { error: dbPhotosError } = await supabase
-        .from('property_photos')
-        .delete()
-        .eq('property_id', propertyId);
-
-      if (dbPhotosError) throw dbPhotosError;
-
-      const { error: propertyError } = await supabase
-        .from('properties')
-        .delete()
-        .eq('id', propertyId);
-
-      if (propertyError) throw propertyError;
-
-      return true;
-    } catch (error) {
-      console.error('Error deleting property and photos:', error);
-      throw error;
-    }
-  }
-
-  async function handleDeleteProperty() {
+  const handleDeleteProperty = async () => {
     if (!propertyToDelete) return;
-
+    
     setDeleting(true);
-    try {
-      await deletePropertyWithPhotos(propertyToDelete);
-      
-      setProperties(properties.filter((p) => p.id !== propertyToDelete));
-      toast.success('Property deleted successfully');
+    const success = await deleteProperty(propertyToDelete);
+    setDeleting(false);
+    
+    if (success) {
       setDeleteDialogOpen(false);
       setPropertyToDelete(null);
-      
-      // Update stats
-      await fetchProperties();
-    } catch (error) {
-      console.error('Error deleting property:', error);
-      toast.error('Failed to delete property');
-    } finally {
-      setDeleting(false);
     }
-  }
+  };
 
-  async function handleStatusChange(
-    propertyId: string,
-    newStatus: 'active' | 'rented'
-  ) {
-    try {
-      const { error } = await supabase
-        .from('properties')
-        .update({ status: newStatus })
-        .eq('id', propertyId);
-
-      if (error) throw error;
-
-      setProperties(
-        properties.map((p) =>
-          p.id === propertyId ? { ...p, status: newStatus } : p
-        )
-      );
-
-      toast.success(`Property marked as ${newStatus}`);
-      await fetchProperties();
-    } catch (error) {
-      console.error('Error updating status:', error);
-      toast.error('Failed to update status');
-    }
-  }
-
-  // Loading state - only show if not initialized yet
+  // Loading state
   if (!isInitialized || isLoading || loading) {
     return (
       <div className="container mx-auto px-4 py-8">
-        <div className="flex justify-center items-center min-h-100">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <div className="flex justify-between items-center mb-8">
+          <div>
+            <h1 className="text-3xl font-bold">Landlord Dashboard</h1>
+            <p className="text-gray-600">Manage your properties and track performance</p>
+          </div>
+          <Button disabled>
+            <Plus className="mr-2 h-4 w-4" />
+            Add New Property
+          </Button>
         </div>
+        <StatsSkeleton />
+        <PropertyTableSkeleton />
       </div>
     );
   }
 
-  // Show pending verification message if landlord is not verified
+  // Pending verification
   if (userType === 'landlord' && isLandlordPending) {
     return (
       <div className="container mx-auto px-4 py-8">
@@ -372,7 +206,7 @@ export default function LandlordDashboard() {
     );
   }
 
-  // Show rejected verification message
+  // Rejected verification
   if (userType === 'landlord' && isLandlordRejected) {
     return (
       <div className="container mx-auto px-4 py-8">
@@ -405,7 +239,7 @@ export default function LandlordDashboard() {
     );
   }
 
-  // Show message if user is not a landlord
+  // Not a landlord
   if (userType !== 'landlord') {
     return null;
   }
@@ -445,13 +279,14 @@ export default function LandlordDashboard() {
                 ✓ Account Verified
               </p>
               <p className="text-sm text-green-600 dark:text-green-300">
-                Your landlord account is verified. You can now list properties.
+                Your landlord account is verified. You can now list properties in Eswatini.
               </p>
             </div>
           </div>
           <button
             onClick={() => setShowVerificationBanner(false)}
             className="text-green-600 hover:text-green-800"
+            aria-label="Dismiss banner"
           >
             ×
           </button>
@@ -547,7 +382,7 @@ export default function LandlordDashboard() {
                 <Building className="h-12 w-12 mx-auto text-gray-400 mb-4" />
                 <h3 className="text-lg font-semibold mb-2">No properties yet</h3>
                 <p className="text-gray-500 mb-4">
-                  Start by adding your first property listing.
+                  Start by adding your first property listing in Eswatini.
                 </p>
                 <Button asChild>
                   <Link href="/dashboard/landlord/add-property">
@@ -561,7 +396,7 @@ export default function LandlordDashboard() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Property</TableHead>
-                    <TableHead>Price</TableHead>
+                    <TableHead>Price (E)</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Views</TableHead>
                     <TableHead>Listed</TableHead>
@@ -598,8 +433,7 @@ export default function LandlordDashboard() {
                                 {property.title}
                               </Link>
                               <div className="text-sm text-gray-500 truncate">
-                                {property.location_suburb},{' '}
-                                {property.location_city}
+                                {property.location_suburb}, {property.location_city}
                               </div>
                             </div>
                           </div>
@@ -671,7 +505,7 @@ export default function LandlordDashboard() {
                               {property.status === 'active' && (
                                 <DropdownMenuItem
                                   onClick={() =>
-                                    handleStatusChange(property.id, 'rented')
+                                    updateStatus(property.id, 'rented')
                                   }
                                 >
                                   <CheckCircle className="mr-2 h-4 w-4 text-green-600" />
@@ -681,7 +515,7 @@ export default function LandlordDashboard() {
                               {property.status === 'rented' && (
                                 <DropdownMenuItem
                                   onClick={() =>
-                                    handleStatusChange(property.id, 'active')
+                                    updateStatus(property.id, 'active')
                                   }
                                 >
                                   <XCircle className="mr-2 h-4 w-4 text-amber-600" />
@@ -693,10 +527,7 @@ export default function LandlordDashboard() {
 
                               <DropdownMenuItem
                                 className="text-red-600"
-                                onClick={() => {
-                                  setPropertyToDelete(property.id);
-                                  setDeleteDialogOpen(true);
-                                }}
+                                onClick={() => handleDeleteClick(property.id)}
                               >
                                 <Trash2 className="mr-2 h-4 w-4" />
                                 Delete
@@ -756,4 +587,3 @@ export default function LandlordDashboard() {
     </div>
   );
 }
-

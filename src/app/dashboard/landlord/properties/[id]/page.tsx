@@ -1,7 +1,7 @@
 // src/app/dashboard/landlord/properties/[id]/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -29,9 +29,8 @@ import {
   TrendingDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
-
-// Remove: import { getPropertiesByLandlordId, setMockUserId } from '../../mockData';
-// Remove: const USE_MOCK_DATA = true;
+import { useLandlordProperties } from '@/hooks/useLandlordProperties';
+import { usePriceInsight } from '@/hooks/usePriceInsight';
 
 interface PropertyWithPhotos extends Property {
   photos: PropertyPhoto[];
@@ -41,6 +40,7 @@ export default function LandlordPropertyManagePage() {
   const { user, isLoading: authLoading } = useAuth();
   const params = useParams();
   const router = useRouter();
+  const propertyId = params.id as string;
 
   const [property, setProperty] = useState<PropertyWithPhotos | null>(null);
   const [loading, setLoading] = useState(true);
@@ -48,14 +48,22 @@ export default function LandlordPropertyManagePage() {
   const [activeTab, setActiveTab] = useState('overview');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [priceComparison, setPriceComparison] = useState<{
-    average: number;
-    min: number;
-    max: number;
-    count: number;
-    position: 'below' | 'above' | 'average';
-    diff: number;
-  } | null>(null);
+  
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const { deleteProperty, updateStatus } = useLandlordProperties({
+    autoFetch: false,
+    userId: user?.id,
+  });
+
+  // Use price insight hook
+  const { priceInsight, checkingPrice } = usePriceInsight({
+    price: property?.price || 0,
+    city: property?.location_city || '',
+    propertyType: property?.property_type || '',
+    bedrooms: property?.bedrooms || 0,
+    excludePropertyId: propertyId,
+  });
 
   // Check authentication
   useEffect(() => {
@@ -64,16 +72,22 @@ export default function LandlordPropertyManagePage() {
     }
   }, [user, authLoading, router]);
 
-  // Fetch property data
+  // Fetch property data with abort controller
   useEffect(() => {
     const fetchPropertyData = async () => {
-      if (!user || !params.id) return;
+      if (!user || !propertyId) return;
+
+      // Cancel previous request
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      
+      abortControllerRef.current = new AbortController();
 
       try {
         setLoading(true);
         setError(null);
 
-        // Fetch property with photos
         const { data: propertyData, error: propertyError } = await supabase
           .from('properties')
           .select(
@@ -89,7 +103,7 @@ export default function LandlordPropertyManagePage() {
             )
           `
           )
-          .eq('id', params.id)
+          .eq('id', propertyId)
           .eq('landlord_id', user.id)
           .order('display_order', { foreignTable: 'photos', ascending: true });
 
@@ -105,10 +119,11 @@ export default function LandlordPropertyManagePage() {
 
         const property = propertyData[0] as PropertyWithPhotos;
         setProperty(property);
-
-        // Calculate price comparison
-        await fetchPriceComparison(property);
       } catch (err) {
+        // Ignore abort errors
+        if (err instanceof Error && err.name === 'AbortError') {
+          return;
+        }
         const errorMessage =
           err instanceof Error ? err.message : 'Failed to load property';
         setError(errorMessage);
@@ -118,75 +133,23 @@ export default function LandlordPropertyManagePage() {
       }
     };
 
-    if (user && params.id) {
+    if (user && propertyId) {
       fetchPropertyData();
     }
-  }, [user, params.id]);
 
-  const fetchPriceComparison = async (currentProperty: PropertyWithPhotos) => {
-    try {
-      // Fetch similar properties for price comparison
-      const { data, error } = await supabase
-        .from('properties')
-        .select('price')
-        .eq('location_city', currentProperty.location_city)
-        .eq('property_type', currentProperty.property_type)
-        .eq('bedrooms', currentProperty.bedrooms || 0)
-        .eq('status', 'active')
-        .not('id', 'eq', currentProperty.id);
-
-      if (error) throw error;
-
-      if (!data || data.length === 0) {
-        setPriceComparison(null);
-        return;
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
       }
-
-      const prices = data.map((p) => p.price);
-      const avg = prices.reduce((a, b) => a + b, 0) / prices.length;
-      const min = Math.min(...prices);
-      const max = Math.max(...prices);
-
-      let position: 'below' | 'above' | 'average' = 'average';
-      let diff = 0;
-
-      if (currentProperty.price < avg * 0.9) {
-        position = 'below';
-        diff = Math.round(((avg - currentProperty.price) / avg) * 100);
-      } else if (currentProperty.price > avg * 1.1) {
-        position = 'above';
-        diff = Math.round(((currentProperty.price - avg) / avg) * 100);
-      }
-
-      setPriceComparison({
-        average: avg,
-        min,
-        max,
-        count: data.length,
-        position,
-        diff,
-      });
-    } catch (error) {
-      console.error('Error fetching price comparison:', error);
-    }
-  };
+    };
+  }, [user, propertyId]);
 
   const handleStatusChange = async (newStatus: 'active' | 'rented') => {
     if (!property) return;
-
-    try {
-      const { error } = await supabase
-        .from('properties')
-        .update({ status: newStatus })
-        .eq('id', property.id);
-
-      if (error) throw error;
-
+    
+    const success = await updateStatus(property.id, newStatus);
+    if (success) {
       setProperty({ ...property, status: newStatus });
-      toast.success(`Property marked as ${newStatus}`);
-    } catch (err) {
-      console.error('Error updating status:', err);
-      toast.error('Failed to update property status');
     }
   };
 
@@ -194,21 +157,12 @@ export default function LandlordPropertyManagePage() {
     if (!property) return;
 
     setDeleting(true);
-    try {
-      const { error } = await supabase
-        .from('properties')
-        .delete()
-        .eq('id', property.id);
-
-      if (error) throw error;
-
-      toast.success('Property deleted successfully');
-      router.push('/dashboard/landlord');
-    } catch (err) {
-      console.error('Error deleting property:', err);
-      toast.error('Failed to delete property');
-      setDeleting(false);
+    const success = await deleteProperty(property.id);
+    setDeleting(false);
+    
+    if (success) {
       setDeleteDialogOpen(false);
+      router.push('/dashboard/landlord');
     }
   };
 
@@ -264,7 +218,7 @@ export default function LandlordPropertyManagePage() {
                 <h1 className="text-xl font-semibold">{property.title}</h1>
                 <div className="flex items-center text-sm text-gray-500">
                   <MapPin className="h-3 w-3 mr-1" />
-                  {property.location_suburb}, {property.location_city}
+                  {property.location_suburb}, {property.location_city}, Eswatini
                 </div>
               </div>
               <Badge
@@ -330,15 +284,15 @@ export default function LandlordPropertyManagePage() {
                     E{property.price.toLocaleString()}
                   </p>
                 </div>
-                {priceComparison && priceComparison.position !== 'average' && (
+                {priceInsight && !checkingPrice && priceInsight.position !== 'average' && (
                   <div
                     className={`text-xs ${
-                      priceComparison.position === 'below'
+                      priceInsight.position === 'below'
                         ? 'text-blue-600'
                         : 'text-yellow-600'
                     }`}
                   >
-                    {priceComparison.position === 'below' ? (
+                    {priceInsight.position === 'below' ? (
                       <TrendingDown className="h-5 w-5" />
                     ) : (
                       <TrendingUp className="h-5 w-5" />
@@ -374,28 +328,28 @@ export default function LandlordPropertyManagePage() {
                         <p className="font-semibold text-lg">
                           E{property.price.toLocaleString()}/month
                         </p>
-                        {priceComparison && (
+                        {priceInsight && !checkingPrice && (
                           <div
                             className={`text-sm mt-1 ${
-                              priceComparison.position === 'below'
+                              priceInsight.position === 'below'
                                 ? 'text-blue-600'
-                                : priceComparison.position === 'above'
+                                : priceInsight.position === 'above'
                                 ? 'text-yellow-600'
                                 : 'text-green-600'
                             }`}
                           >
-                            {priceComparison.position === 'below' && (
+                            {priceInsight.position === 'below' && (
                               <span>
-                                ↓ {priceComparison.diff}% below market average
+                                ↓ {priceInsight.diff}% below Eswatini market average
                               </span>
                             )}
-                            {priceComparison.position === 'above' && (
+                            {priceInsight.position === 'above' && (
                               <span>
-                                ↑ {priceComparison.diff}% above market average
+                                ↑ {priceInsight.diff}% above Eswatini market average
                               </span>
                             )}
-                            {priceComparison.position === 'average' && (
-                              <span>✓ Within market range</span>
+                            {priceInsight.position === 'average' && (
+                              <span>✓ Within Eswatini market range</span>
                             )}
                           </div>
                         )}
@@ -462,7 +416,7 @@ export default function LandlordPropertyManagePage() {
                       <p className="text-gray-700">
                         {property.location_address || 'Address not provided'}
                         <br />
-                        {property.location_suburb}, {property.location_city}
+                        {property.location_suburb}, {property.location_city}, Eswatini
                       </p>
                     </div>
 
@@ -547,19 +501,18 @@ export default function LandlordPropertyManagePage() {
                     <CardTitle>Market Comparison</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    {priceComparison ? (
+                    {priceInsight && !checkingPrice ? (
                       <div className="space-y-4">
                         <p className="text-sm text-gray-600">
-                          Based on {priceComparison.count} similar{' '}
-                          {property.property_type}s in {property.location_city}
+                          Based on {priceInsight.count} similar {property.property_type}s in {property.location_city}, Eswatini
                         </p>
 
                         <div className="space-y-2">
                           <div className="flex justify-between text-sm">
                             <span className="text-gray-500">Market range:</span>
                             <span className="font-medium">
-                              E{priceComparison.min.toLocaleString()} - E
-                              {priceComparison.max.toLocaleString()}
+                              E{priceInsight.min.toLocaleString()} - E
+                              {priceInsight.max.toLocaleString()}
                             </span>
                           </div>
                           <div className="flex justify-between text-sm">
@@ -567,7 +520,7 @@ export default function LandlordPropertyManagePage() {
                             <span className="font-medium">
                               E
                               {Math.round(
-                                priceComparison.average
+                                priceInsight.average
                               ).toLocaleString()}
                             </span>
                           </div>
@@ -575,21 +528,21 @@ export default function LandlordPropertyManagePage() {
                             <span className="text-gray-500">Your price:</span>
                             <span
                               className={`font-medium ${
-                                priceComparison.position === 'below'
+                                priceInsight.position === 'below'
                                   ? 'text-blue-600'
-                                  : priceComparison.position === 'above'
+                                  : priceInsight.position === 'above'
                                   ? 'text-yellow-600'
                                   : 'text-green-600'
                               }`}
                             >
                               E{property.price.toLocaleString()}
-                              {priceComparison.position !== 'average' && (
+                              {priceInsight.position !== 'average' && (
                                 <span className="ml-1">
                                   (
-                                  {priceComparison.position === 'below'
+                                  {priceInsight.position === 'below'
                                     ? '-'
                                     : '+'}
-                                  {priceComparison.diff}%)
+                                  {priceInsight.diff}%)
                                 </span>
                               )}
                             </span>
@@ -612,7 +565,7 @@ export default function LandlordPropertyManagePage() {
                       </div>
                     ) : (
                       <p className="text-sm text-gray-500">
-                        Not enough similar properties to compare pricing.
+                        Not enough similar properties in Eswatini to compare pricing.
                       </p>
                     )}
                   </CardContent>
@@ -722,7 +675,7 @@ export default function LandlordPropertyManagePage() {
                   </h3>
                   <p className="text-gray-500">
                     We&apos;re working on bringing you detailed insights about
-                    your listing performance.
+                    your listing performance in Eswatini.
                   </p>
                 </div>
               </CardContent>

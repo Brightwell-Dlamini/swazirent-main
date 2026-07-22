@@ -1,7 +1,7 @@
 // src/app/dashboard/landlord/verify/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useVerification } from '@/hooks/useVerification';
@@ -23,8 +23,41 @@ import {
   Loader2,
   ArrowLeft,
   Info,
+  Eye,
+  X,
 } from 'lucide-react';
 import Link from 'next/link';
+import Image from 'next/image';
+import { MAX_DOCUMENT_SIZE } from '@/utils/constants';
+
+type DocumentType = 'idDocument' | 'proofOfAddress' | 'businessLicense';
+
+const VERIFICATION_CONFIGS = {
+  unverified: {
+    icon: AlertCircle,
+    color: 'gray',
+    title: 'Not Submitted',
+    description: 'Complete your verification to start listing properties in Eswatini.',
+  },
+  pending: {
+    icon: Clock,
+    color: 'amber',
+    title: 'Verification Pending',
+    description: 'Your documents are being reviewed. This typically takes 1-2 business days.',
+  },
+  verified: {
+    icon: CheckCircle,
+    color: 'green',
+    title: 'Verified!',
+    description: 'Your account has been verified. You can now list properties in Eswatini.',
+  },
+  rejected: {
+    icon: XCircle,
+    color: 'red',
+    title: 'Verification Rejected',
+    description: 'Your verification was rejected. Please submit new or updated documents below.',
+  },
+} as const;
 
 export default function VerificationPage() {
   const { user, userType, isLoading: authLoading } = useAuth();
@@ -39,8 +72,19 @@ export default function VerificationPage() {
     proofOfAddress: null,
     businessLicense: null,
   });
+  const [documentPreviews, setDocumentPreviews] = useState<{
+    idDocument: string | null;
+    proofOfAddress: string | null;
+    businessLicense: string | null;
+  }>({
+    idDocument: null,
+    proofOfAddress: null,
+    businessLicense: null,
+  });
   const [notes, setNotes] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+
+  const config = VERIFICATION_CONFIGS[status as keyof typeof VERIFICATION_CONFIGS] || VERIFICATION_CONFIGS.unverified;
 
   useEffect(() => {
     if (!authLoading) {
@@ -57,19 +101,42 @@ export default function VerificationPage() {
     }
   }, [user, userType, authLoading, router, refreshVerification]);
 
-  const handleFileChange = (
-    e: React.ChangeEvent<HTMLInputElement>,
-    type: 'idDocument' | 'proofOfAddress' | 'businessLicense'
-  ) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 10 * 1024 * 1024) {
-        toast.error('File size must be under 10MB');
-        return;
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>, type: DocumentType) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        if (file.size > MAX_DOCUMENT_SIZE) {
+          toast.error('File size must be under 10MB');
+          return;
+        }
+
+        // Check if it's an image or PDF
+        const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+        if (!validTypes.includes(file.type)) {
+          toast.error('Please upload a JPG, PNG, or PDF file');
+          return;
+        }
+
+        // Revoke previous preview
+        if (documentPreviews[type]) {
+          URL.revokeObjectURL(documentPreviews[type]!);
+        }
+
+        const preview = URL.createObjectURL(file);
+        setDocuments(prev => ({ ...prev, [type]: file }));
+        setDocumentPreviews(prev => ({ ...prev, [type]: preview }));
       }
-      setDocuments(prev => ({ ...prev, [type]: file }));
+    },
+    [documentPreviews]
+  );
+
+  const removeDocument = useCallback((type: DocumentType) => {
+    if (documentPreviews[type]) {
+      URL.revokeObjectURL(documentPreviews[type]!);
     }
-  };
+    setDocuments(prev => ({ ...prev, [type]: null }));
+    setDocumentPreviews(prev => ({ ...prev, [type]: null }));
+  }, [documentPreviews]);
 
   const handleSubmit = async () => {
     if (!documents.idDocument) {
@@ -85,7 +152,17 @@ export default function VerificationPage() {
 
     if (success) {
       // Clear form
+      Object.keys(documentPreviews).forEach(key => {
+        if (documentPreviews[key as DocumentType]) {
+          URL.revokeObjectURL(documentPreviews[key as DocumentType]!);
+        }
+      });
       setDocuments({
+        idDocument: null,
+        proofOfAddress: null,
+        businessLicense: null,
+      });
+      setDocumentPreviews({
         idDocument: null,
         proofOfAddress: null,
         businessLicense: null,
@@ -93,6 +170,15 @@ export default function VerificationPage() {
       setNotes('');
     }
   };
+
+  // Cleanup previews on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(documentPreviews).forEach(preview => {
+        if (preview) URL.revokeObjectURL(preview);
+      });
+    };
+  }, [documentPreviews]);
 
   if (isLoading || authLoading) {
     return (
@@ -104,9 +190,10 @@ export default function VerificationPage() {
     );
   }
 
+  const Icon = config.icon;
+
   return (
     <div className="container mx-auto px-4 py-8 max-w-3xl">
-      {/* Back Button */}
       <Button variant="ghost" asChild className="mb-6">
         <Link href="/dashboard/landlord">
           <ArrowLeft className="h-4 w-4 mr-2" />
@@ -120,7 +207,7 @@ export default function VerificationPage() {
           Landlord Verification
         </h1>
         <p className="text-gray-600 mt-1">
-          Complete your verification to start listing properties
+          Complete your verification to start listing properties in Eswatini
         </p>
       </div>
 
@@ -175,36 +262,15 @@ export default function VerificationPage() {
       </div>
 
       {/* Status Messages */}
-      {status === 'verified' && (
-        <Alert className="mb-6 border-green-500 bg-green-50 dark:bg-green-950/50">
-          <CheckCircle className="h-4 w-4 text-green-600" />
-          <AlertTitle className="text-green-800 dark:text-green-200">Verified!</AlertTitle>
-          <AlertDescription className="text-green-700 dark:text-green-300">
-            Your account has been verified. You can now list properties.
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {status === 'pending' && (
-        <Alert className="mb-6 border-amber-500 bg-amber-50 dark:bg-amber-950/50">
-          <Clock className="h-4 w-4 text-amber-600" />
-          <AlertTitle className="text-amber-800 dark:text-amber-200">Verification Pending</AlertTitle>
-          <AlertDescription className="text-amber-700 dark:text-amber-300">
-            Your documents are being reviewed. This typically takes 1-2 business days.
-            You'll receive an email notification once your account is verified.
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {status === 'rejected' && (
-        <Alert className="mb-6 border-red-500 bg-red-50 dark:bg-red-950/50">
-          <XCircle className="h-4 w-4 text-red-600" />
-          <AlertTitle className="text-red-800 dark:text-red-200">Verification Rejected</AlertTitle>
-          <AlertDescription className="text-red-700 dark:text-red-300">
-            Your verification was rejected. Please submit new or updated documents below.
-          </AlertDescription>
-        </Alert>
-      )}
+      <Alert className={`mb-6 border-${config.color}-500 bg-${config.color}-50 dark:bg-${config.color}-950/50`}>
+        <Icon className={`h-4 w-4 text-${config.color}-600`} />
+        <AlertTitle className={`text-${config.color}-800 dark:text-${config.color}-200`}>
+          {config.title}
+        </AlertTitle>
+        <AlertDescription className={`text-${config.color}-700 dark:text-${config.color}-300`}>
+          {config.description}
+        </AlertDescription>
+      </Alert>
 
       {/* Verification Form */}
       {(status === 'unverified' || status === 'rejected') && (
@@ -213,6 +279,7 @@ export default function VerificationPage() {
             <CardTitle>Submit Verification Documents</CardTitle>
             <CardDescription>
               Please upload clear photos or scans of your documents. All files must be under 10MB.
+              Accepted formats: JPG, PNG, PDF.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -221,25 +288,47 @@ export default function VerificationPage() {
               <Label className="font-semibold">
                 Government ID *
                 <span className="font-normal text-gray-500 ml-2">
-                  (Passport, Driver's License, or National ID)
+                  (Passport, Driver&apos;s License, or National ID)
                 </span>
               </Label>
               <div className="mt-2">
-                <div className="flex items-center gap-4">
-                  <div className="flex-1">
-                    <Input
-                      type="file"
-                      accept="image/*,.pdf"
-                      onChange={(e) => handleFileChange(e, 'idDocument')}
-                      className="cursor-pointer"
-                    />
+                {documentPreviews.idDocument ? (
+                  <div className="relative inline-block">
+                    {documentPreviews.idDocument.startsWith('blob:') ? (
+                      <div className="relative w-32 h-32 rounded-lg overflow-hidden border">
+                        <Image
+                          src={documentPreviews.idDocument}
+                          alt="ID Document Preview"
+                          fill
+                          className="object-cover"
+                        />
+                      </div>
+                    ) : (
+                      <div className="p-4 border rounded-lg bg-gray-50">
+                        <FileText className="h-8 w-8 text-gray-400" />
+                        <p className="text-sm mt-1">{documents.idDocument?.name}</p>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeDocument('idDocument')}
+                      className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
                   </div>
-                  {documents.idDocument && (
-                    <span className="text-sm text-green-600">
-                      ✓ {documents.idDocument.name}
-                    </span>
-                  )}
-                </div>
+                ) : (
+                  <div className="flex items-center gap-4">
+                    <div className="flex-1">
+                      <Input
+                        type="file"
+                        accept="image/*,.pdf"
+                        onChange={(e) => handleFileChange(e, 'idDocument')}
+                        className="cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                )}
                 <p className="text-xs text-gray-500 mt-1">
                   Accepted formats: JPG, PNG, PDF (Max 10MB)
                 </p>
@@ -255,21 +344,43 @@ export default function VerificationPage() {
                 </span>
               </Label>
               <div className="mt-2">
-                <div className="flex items-center gap-4">
-                  <div className="flex-1">
-                    <Input
-                      type="file"
-                      accept="image/*,.pdf"
-                      onChange={(e) => handleFileChange(e, 'proofOfAddress')}
-                      className="cursor-pointer"
-                    />
+                {documentPreviews.proofOfAddress ? (
+                  <div className="relative inline-block">
+                    {documentPreviews.proofOfAddress.startsWith('blob:') ? (
+                      <div className="relative w-32 h-32 rounded-lg overflow-hidden border">
+                        <Image
+                          src={documentPreviews.proofOfAddress}
+                          alt="Proof of Address Preview"
+                          fill
+                          className="object-cover"
+                        />
+                      </div>
+                    ) : (
+                      <div className="p-4 border rounded-lg bg-gray-50">
+                        <FileText className="h-8 w-8 text-gray-400" />
+                        <p className="text-sm mt-1">{documents.proofOfAddress?.name}</p>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeDocument('proofOfAddress')}
+                      className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
                   </div>
-                  {documents.proofOfAddress && (
-                    <span className="text-sm text-green-600">
-                      ✓ {documents.proofOfAddress.name}
-                    </span>
-                  )}
-                </div>
+                ) : (
+                  <div className="flex items-center gap-4">
+                    <div className="flex-1">
+                      <Input
+                        type="file"
+                        accept="image/*,.pdf"
+                        onChange={(e) => handleFileChange(e, 'proofOfAddress')}
+                        className="cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -282,21 +393,43 @@ export default function VerificationPage() {
                 </span>
               </Label>
               <div className="mt-2">
-                <div className="flex items-center gap-4">
-                  <div className="flex-1">
-                    <Input
-                      type="file"
-                      accept="image/*,.pdf"
-                      onChange={(e) => handleFileChange(e, 'businessLicense')}
-                      className="cursor-pointer"
-                    />
+                {documentPreviews.businessLicense ? (
+                  <div className="relative inline-block">
+                    {documentPreviews.businessLicense.startsWith('blob:') ? (
+                      <div className="relative w-32 h-32 rounded-lg overflow-hidden border">
+                        <Image
+                          src={documentPreviews.businessLicense}
+                          alt="Business License Preview"
+                          fill
+                          className="object-cover"
+                        />
+                      </div>
+                    ) : (
+                      <div className="p-4 border rounded-lg bg-gray-50">
+                        <FileText className="h-8 w-8 text-gray-400" />
+                        <p className="text-sm mt-1">{documents.businessLicense?.name}</p>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeDocument('businessLicense')}
+                      className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
                   </div>
-                  {documents.businessLicense && (
-                    <span className="text-sm text-green-600">
-                      ✓ {documents.businessLicense.name}
-                    </span>
-                  )}
-                </div>
+                ) : (
+                  <div className="flex items-center gap-4">
+                    <div className="flex-1">
+                      <Input
+                        type="file"
+                        accept="image/*,.pdf"
+                        onChange={(e) => handleFileChange(e, 'businessLicense')}
+                        className="cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -355,21 +488,21 @@ export default function VerificationPage() {
             <h4 className="font-medium">Why do I need to verify?</h4>
             <p className="text-sm text-gray-500">
               Verification helps build trust with renters and ensures a safe
-              platform for everyone. Verified landlords get a special badge on
+              platform for everyone in Eswatini. Verified landlords get a special badge on
               their listings.
             </p>
           </div>
           <div>
             <h4 className="font-medium">How long does it take?</h4>
             <p className="text-sm text-gray-500">
-              Most verifications are completed within 1-2 business days. You'll
+              Most verifications are completed within 1-2 business days. You&apos;ll
               receive an email notification once your account is verified.
             </p>
           </div>
           <div>
             <h4 className="font-medium">What if my verification is rejected?</h4>
             <p className="text-sm text-gray-500">
-              If your verification is rejected, you'll receive an email explaining
+              If your verification is rejected, you&apos;ll receive an email explaining
               why. You can submit new documents for review at any time.
             </p>
           </div>

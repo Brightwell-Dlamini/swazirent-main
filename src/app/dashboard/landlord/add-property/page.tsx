@@ -1,13 +1,23 @@
 // src/app/dashboard/landlord/add-property/page.tsx
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
 import { useVerification } from '@/hooks/useVerification';
+import { usePriceInsight } from '@/hooks/usePriceInsight';
+import { useMediaUpload } from '@/hooks/useMediaUpload';
 import { supabase } from '@/lib/supabase';
 import { PropertyType } from '@/types/property';
+import {
+  ESWATINI_CITIES,
+  PROPERTY_TYPES,
+  ESWATINI_AMENITIES,
+  ROOM_OPTIONS,
+  BATH_OPTIONS,
+} from '@/utils/constants';
+import { normalizeEswatiniPhone, isValidEswatiniPhone } from '@/utils/phone';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -36,34 +46,6 @@ import {
 import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 
-const CITIES = [
-  'Manzini', 'Mbabane', 'Matsapha', 'Nhlangano', 'Siteki', 
-  'Big Bend', 'Ezulwini', 'Lobamba', 'Piggs Peak', 'Kwaluseni',
-  'Hlatikulu', 'Mhlume', 'Simunye'
-];
-
-const PROPERTY_TYPES: PropertyType[] = ['house', 'flat/apartment', 'backrooms', 'shared', 'other'];
-
-// Eswatini-specific amenities
-const ESWATINI_AMENITIES = [
-  'Parking', 'Own Electrity Meter', 'Shared Electrity Meter', 'Security', 'Own Water Meter', 'Fully Fitted',
-   'Pet Friendly', 'Shower', 'Bathtub'
-  
-];
-
-interface PriceInsight {
-  average: number;
-  min: number;
-  max: number;
-  count: number;
-  suggestion: 'low' | 'good' | 'high' | null;
-  message: string;
-}
-
-// Valid bedroom/bathroom options
-const ROOM_OPTIONS = ['0', '1', '2', '3', '4', '5'] as const;
-const BATH_OPTIONS = ['0', '1', '2', '3', '4'] as const;
-
 export default function AddPropertyPage() {
   const { user, userType, isLoading: authLoading } = useAuth();
   const { isLandlordVerified, isLandlordPending, refreshVerification } = useVerification();
@@ -71,12 +53,11 @@ export default function AddPropertyPage() {
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [photos, setPhotos] = useState<File[]>([]);
-  const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
-  const [priceInsight, setPriceInsight] = useState<PriceInsight | null>(null);
-  const [checkingPrice, setCheckingPrice] = useState(false);
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
-  const priceCheckTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const { files: photos, previews: photoPreviews, addFiles: addPhotos, removeFile: removePhoto, count: photoCount } = useMediaUpload({
+    maxFiles: 15,
+  });
 
   const [formData, setFormData] = useState({
     title: '',
@@ -97,132 +78,41 @@ export default function AddPropertyPage() {
 
   const totalSteps = 4;
 
-  // Check auth and permissions - runs before any rendering
+  // Price insight hook
+  const { priceInsight, checkingPrice, applySuggestedPrice } = usePriceInsight({
+    price: formData.price,
+    city: formData.city,
+    propertyType: formData.property_type,
+    bedrooms: formData.bedrooms,
+  });
+
+  // Check auth and permissions
   useEffect(() => {
-    // Wait for auth to load
     if (authLoading) return;
 
-    // Not authenticated
     if (!user) {
       router.push('/auth/login');
       return;
     }
 
-    // Check user type
     if (userType && userType !== 'landlord') {
       router.push('/dashboard');
       return;
     }
 
-    // If userType is null (profile not loaded yet), wait
     if (userType === null) {
       return;
     }
 
-    // User is authorized
     setIsAuthorized(true);
   }, [user, userType, authLoading, router]);
 
-  // Refresh verification status if pending
+  // Refresh verification if pending
   useEffect(() => {
     if (user && userType === 'landlord' && isLandlordPending) {
       refreshVerification();
     }
   }, [user, userType, isLandlordPending, refreshVerification]);
-
-  // Price comparison effect with cleanup
-  useEffect(() => {
-    // Clear any existing timeout
-    if (priceCheckTimeoutRef.current) {
-      clearTimeout(priceCheckTimeoutRef.current);
-    }
-
-    async function checkPrice() {
-      const price = parseFloat(formData.price);
-      const bedrooms = parseInt(formData.bedrooms);
-      
-      if (
-        !formData.price ||
-        isNaN(price) ||
-        price <= 0 ||
-        !formData.city ||
-        !formData.property_type ||
-        formData.bedrooms === '' ||
-        isNaN(bedrooms)
-      ) {
-        setPriceInsight(null);
-        return;
-      }
-
-      setCheckingPrice(true);
-      try {
-        const { data, error } = await supabase
-          .from('properties')
-          .select('price')
-          .eq('location_city', formData.city)
-          .eq('property_type', formData.property_type)
-          .eq('bedrooms', bedrooms)
-          .eq('status', 'active')
-          .not('price', 'is', null);
-
-        if (error) throw error;
-
-        if (!data || data.length === 0) {
-          setPriceInsight({
-            average: 0,
-            min: 0,
-            max: 0,
-            count: 0,
-            suggestion: null,
-            message: 'Not enough similar properties to compare pricing.',
-          });
-          return;
-        }
-
-        const prices = data.map((p) => p.price);
-        const avg = prices.reduce((a, b) => a + b, 0) / prices.length;
-        const min = Math.min(...prices);
-        const max = Math.max(...prices);
-
-        let suggestion: 'low' | 'good' | 'high' | null = null;
-        let message = '';
-
-        if (price < min * 0.9) {
-          suggestion = 'low';
-          message = `Your price is below market average (E${avg.toLocaleString()}). You might get interest quickly but could be leaving money on the table.`;
-        } else if (price > max * 1.1) {
-          suggestion = 'high';
-          message = `Your price is above market average (E${avg.toLocaleString()}). This might take longer to rent. Consider E${min.toLocaleString()}-E${max.toLocaleString()}`;
-        } else {
-          suggestion = 'good';
-          message = `Your price is within market range (E${min.toLocaleString()} - E${max.toLocaleString()}). Good job!`;
-        }
-
-        setPriceInsight({
-          average: avg,
-          min,
-          max,
-          count: data.length,
-          suggestion,
-          message,
-        });
-      } catch (error) {
-        console.error('Error checking price:', error);
-        setPriceInsight(null);
-      } finally {
-        setCheckingPrice(false);
-      }
-    }
-
-    // Debounce the price check
-    priceCheckTimeoutRef.current = setTimeout(checkPrice, 800);
-
-    return () => {
-      if (priceCheckTimeoutRef.current) {
-        clearTimeout(priceCheckTimeoutRef.current);
-      }
-    };
-  }, [formData.price, formData.city, formData.property_type, formData.bedrooms]);
 
   const handleNext = useCallback(() => {
     if (currentStep < totalSteps) {
@@ -245,50 +135,13 @@ export default function AddPropertyPage() {
     }));
   }, []);
 
-  const handlePhotoUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    if (photos.length + files.length > 15) {
-      setError('Maximum 15 photos allowed');
-      return;
-    }
-
-    const validFiles = files.filter((file) => {
-      const isValidType = file.type.startsWith('image/');
-      const isValidSize = file.size <= 5 * 1024 * 1024;
-      if (!isValidType || !isValidSize) {
-        setError('Each photo must be an image under 5MB');
-        return false;
-      }
-      return true;
-    });
-
-    setPhotos((prev) => [...prev, ...validFiles]);
-
-    validFiles.forEach((file) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setPhotoPreviews((prev) => [...prev, reader.result as string]);
-      };
-      reader.readAsDataURL(file);
-    });
-  }, [photos.length]);
-
-  const removePhoto = useCallback((index: number) => {
-    setPhotos((prev) => prev.filter((_, i) => i !== index));
-    setPhotoPreviews((prev) => prev.filter((_, i) => i !== index));
+  const handlePhoneChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    const normalized = normalizeEswatiniPhone(value);
+    setFormData((prev) => ({ ...prev, contact_phone: normalized }));
   }, []);
 
-  const applySuggestedPrice = useCallback(() => {
-    if (priceInsight && priceInsight.count > 0) {
-      const suggestedPrice = Math.round(
-        (priceInsight.min + priceInsight.max) / 2,
-      );
-      setFormData((prev) => ({ ...prev, price: suggestedPrice.toString() }));
-      toast.success('Suggested price applied');
-    }
-  }, [priceInsight]);
-
-  const validateForm = (): boolean => {
+  const validateForm = useCallback((): boolean => {
     if (!formData.title.trim()) {
       setError('Please enter a listing title');
       return false;
@@ -307,7 +160,7 @@ export default function AddPropertyPage() {
       return false;
     }
     if (!formData.city) {
-      setError('Please select a city');
+      setError('Please select a city in Eswatini');
       return false;
     }
     if (!formData.suburb.trim()) {
@@ -318,35 +171,12 @@ export default function AddPropertyPage() {
       setError('Please enter a contact phone number');
       return false;
     }
-    return true;
-  };
-
-  // Clean up uploaded photos if property creation fails
-  const cleanupUploadedPhotos = async (photoUrls: string[]) => {
-    if (photoUrls.length === 0) return;
-
-    try {
-      const filePaths = photoUrls.map(url => {
-        // Extract path from URL
-        const parts = url.split('/');
-        const publicIndex = parts.indexOf('public');
-        if (publicIndex !== -1) {
-          return parts.slice(publicIndex + 1).join('/');
-        }
-        return null;
-      }).filter((path): path is string => path !== null);
-
-      if (filePaths.length > 0) {
-        await supabase.storage
-          .from('property-photos')
-          .remove(filePaths);
-        console.log(`Cleaned up ${filePaths.length} orphaned photos`);
-      }
-    } catch (error) {
-      console.error('Error cleaning up photos:', error);
-      // Non-critical, just log
+    if (!isValidEswatiniPhone(formData.contact_phone)) {
+      setError('Please enter a valid Eswatini phone number (e.g., +268 7600 0000)');
+      return false;
     }
-  };
+    return true;
+  }, [formData]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -356,65 +186,64 @@ export default function AddPropertyPage() {
       return;
     }
 
-    // Check if user is verified landlord
     if (!isLandlordVerified) {
-      setError('Your landlord account must be verified before you can list properties.');
+      setError('Your landlord account must be verified before you can list properties in Eswatini.');
       return;
     }
 
-    // Safety check - user should be defined here
     if (!user) {
       setError('You must be logged in to list a property');
       return;
     }
 
     setLoading(true);
-
-    // Store uploaded URLs for cleanup on failure
     let uploadedPhotoUrls: string[] = [];
 
     try {
-      console.log('Starting property submission...');
-
-      // 1. Upload photos to Supabase Storage
+      // 1. Upload photos
       const photoUrls: string[] = [];
 
       if (photos.length > 0) {
-        console.log(`Uploading ${photos.length} photos...`);
-        
         for (let i = 0; i < photos.length; i++) {
           const photo = photos[i];
           const fileExt = photo.name.split('.').pop() || 'jpg';
-          // Use user.id which is guaranteed to exist at this point
           const fileName = `${user.id}/${Date.now()}-${i}.${fileExt}`;
-
-          console.log(`Uploading photo ${i + 1}/${photos.length}: ${fileName}`);
 
           const { error: uploadError } = await supabase.storage
             .from('property-photos')
             .upload(fileName, photo);
 
           if (uploadError) {
-            console.error('Upload error:', uploadError);
-            // Clean up any photos that were already uploaded
-            await cleanupUploadedPhotos(uploadedPhotoUrls);
+            // Clean up any uploaded photos
+            if (uploadedPhotoUrls.length > 0) {
+              const paths = uploadedPhotoUrls.map(url => {
+                const parts = url.split('/');
+                const publicIndex = parts.indexOf('public');
+                if (publicIndex !== -1) {
+                  return parts.slice(publicIndex + 1).join('/');
+                }
+                return null;
+              }).filter((path): path is string => path !== null);
+              
+              if (paths.length > 0) {
+                await supabase.storage.from('property-photos').remove(paths);
+              }
+            }
             throw new Error(`Failed to upload photo ${i + 1}: ${uploadError.message}`);
           }
 
-          const {
-            data: { publicUrl },
-          } = supabase.storage.from('property-photos').getPublicUrl(fileName);
+          const { data: { publicUrl } } = supabase.storage
+            .from('property-photos')
+            .getPublicUrl(fileName);
 
           photoUrls.push(publicUrl);
-          uploadedPhotoUrls = [...photoUrls]; // Track for cleanup
-          console.log(`Photo ${i + 1} uploaded successfully`);
+          uploadedPhotoUrls = [...photoUrls];
         }
       }
 
       // 2. Create property
-      console.log('Creating property record...');
       const propertyData = {
-        landlord_id: user.id, // Safe because we checked user exists
+        landlord_id: user.id,
         title: formData.title.trim(),
         description: formData.description.trim(),
         property_type: formData.property_type as PropertyType,
@@ -428,13 +257,12 @@ export default function AddPropertyPage() {
         amenities: formData.amenities,
         lease_terms: formData.lease_terms.trim() || null,
         contact_whatsapp: formData.contact_whatsapp.trim() || null,
-        contact_phone: formData.contact_phone.trim(),
+        contact_phone: normalizeEswatiniPhone(formData.contact_phone.trim()),
         status: 'pending',
         views: 0,
         is_featured: false,
+        country: 'Eswatini',
       };
-
-      console.log('Property data:', propertyData);
 
       const { data: property, error: propertyError } = await supabase
         .from('properties')
@@ -443,24 +271,30 @@ export default function AddPropertyPage() {
         .single();
 
       if (propertyError) {
-        console.error('Property creation error:', propertyError);
-        // Clean up uploaded photos since property creation failed
-        await cleanupUploadedPhotos(uploadedPhotoUrls);
+        // Clean up photos
+        if (uploadedPhotoUrls.length > 0) {
+          const paths = uploadedPhotoUrls.map(url => {
+            const parts = url.split('/');
+            const publicIndex = parts.indexOf('public');
+            if (publicIndex !== -1) {
+              return parts.slice(publicIndex + 1).join('/');
+            }
+            return null;
+          }).filter((path): path is string => path !== null);
+          
+          if (paths.length > 0) {
+            await supabase.storage.from('property-photos').remove(paths);
+          }
+        }
         throw new Error(`Failed to create property: ${propertyError.message}`);
       }
 
       if (!property) {
-        // Clean up uploaded photos since no property was created
-        await cleanupUploadedPhotos(uploadedPhotoUrls);
         throw new Error('Property was created but no data was returned');
       }
 
-      console.log('Property created successfully:', property.id);
-
       // 3. Add photos to property_photos table
       if (photoUrls.length > 0) {
-        console.log(`Adding ${photoUrls.length} photos to property...`);
-        
         const photoRecords = photoUrls.map((url, index) => ({
           property_id: property.id,
           photo_url: url,
@@ -473,12 +307,8 @@ export default function AddPropertyPage() {
           .insert(photoRecords);
 
         if (photosError) {
-          console.error('Photo record creation error:', photosError);
-          // Property was created but photos failed - clean up storage but keep property
-          await cleanupUploadedPhotos(uploadedPhotoUrls);
+          // Non-critical failure - property created but photos failed
           toast.warning('Property created but failed to save photo records. You can add photos later.');
-        } else {
-          console.log('Photos added successfully');
         }
       }
 
@@ -566,7 +396,7 @@ export default function AddPropertyPage() {
               {checkingPrice && (
                 <div className="mt-2 flex items-center text-sm text-gray-500">
                   <Loader2 className="h-3 w-3 animate-spin mr-2" />
-                  Analyzing market prices...
+                  Analyzing Eswatini market prices...
                 </div>
               )}
 
@@ -595,7 +425,7 @@ export default function AddPropertyPage() {
                     <div className="flex-1">
                       <p className="text-sm font-medium">
                         Based on {priceInsight.count} similar properties in{' '}
-                        {formData.city}
+                        {formData.city}, Eswatini
                       </p>
                       <p className="text-sm mt-1">{priceInsight.message}</p>
                       <div className="flex items-center gap-4 mt-2 text-xs text-gray-600">
@@ -615,7 +445,13 @@ export default function AddPropertyPage() {
                           variant="link"
                           size="sm"
                           className="mt-2 h-auto p-0 text-primary"
-                          onClick={applySuggestedPrice}
+                          onClick={() => {
+                            const suggested = applySuggestedPrice();
+                            if (suggested) {
+                              setFormData(prev => ({ ...prev, price: suggested.toString() }));
+                              toast.success('Suggested price applied');
+                            }
+                          }}
                         >
                           Apply suggested price
                         </Button>
@@ -627,8 +463,7 @@ export default function AddPropertyPage() {
 
               {priceInsight && priceInsight.count === 0 && (
                 <p className="mt-2 text-sm text-gray-500">
-                  No similar properties found in {formData.city} to compare
-                  pricing.
+                  No similar properties found in {formData.city}, Eswatini to compare pricing.
                 </p>
               )}
 
@@ -664,10 +499,10 @@ export default function AddPropertyPage() {
                   }
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select city" />
+                    <SelectValue placeholder="Select city in Eswatini" />
                   </SelectTrigger>
                   <SelectContent>
-                    {CITIES.map((city) => (
+                    {ESWATINI_CITIES.map((city) => (
                       <SelectItem key={city} value={city}>
                         {city}
                       </SelectItem>
@@ -836,7 +671,7 @@ export default function AddPropertyPage() {
                     </div>
                   ))}
 
-                  {photos.length < 15 && (
+                  {photoCount < 15 && (
                     <label className="aspect-square border-2 border-dashed rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-primary transition-colors">
                       <Upload className="h-6 w-6 text-gray-400 mb-1" />
                       <span className="text-xs text-gray-500">Upload</span>
@@ -845,14 +680,14 @@ export default function AddPropertyPage() {
                         accept="image/*"
                         multiple
                         className="hidden"
-                        onChange={handlePhotoUpload}
+                        onChange={(e) => addPhotos(e.target.files || [])}
                       />
                     </label>
                   )}
                 </div>
                 <p className="text-sm text-gray-500">
-                  Upload clear photos of the property. First photo will be the
-                  cover.
+                  Upload clear photos of the property. First photo will be the cover.
+                  {photoCount > 0 && ` (${photoCount}/15)`}
                 </p>
               </div>
             </div>
@@ -867,11 +702,12 @@ export default function AddPropertyPage() {
                   type="tel"
                   placeholder="+268 7600 0000"
                   value={formData.contact_phone}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, contact_phone: e.target.value }))
-                  }
+                  onChange={handlePhoneChange}
                   required
                 />
+                <p className="text-sm text-gray-500 mt-1">
+                  Enter a valid Eswatini phone number
+                </p>
               </div>
 
               <div>
@@ -884,7 +720,7 @@ export default function AddPropertyPage() {
                   onChange={(e) =>
                     setFormData((prev) => ({
                       ...prev,
-                      contact_whatsapp: e.target.value,
+                      contact_whatsapp: normalizeEswatiniPhone(e.target.value),
                     }))
                   }
                 />
@@ -914,7 +750,7 @@ export default function AddPropertyPage() {
                   <div className="flex">
                     <dt className="w-24 text-sm text-gray-500">Location:</dt>
                     <dd className="text-sm">
-                      {formData.suburb || 'Not set'}, {formData.city || 'Not set'}
+                      {formData.suburb || 'Not set'}, {formData.city || 'Not set'}, Eswatini
                     </dd>
                   </div>
                   <div className="flex">
@@ -937,7 +773,7 @@ export default function AddPropertyPage() {
                   </div>
                   <div className="flex">
                     <dt className="w-24 text-sm text-gray-500">Photos:</dt>
-                    <dd className="text-sm">{photos.length} uploaded</dd>
+                    <dd className="text-sm">{photoCount} uploaded</dd>
                   </div>
                 </dl>
               </CardContent>
@@ -945,7 +781,7 @@ export default function AddPropertyPage() {
 
             <Alert className="bg-blue-50 border-blue-200">
               <AlertDescription className="text-blue-800">
-                ℹ️ Your property will be reviewed by an admin before going live.
+                ℹ️ Your property will be reviewed by an admin before going live in Eswatini.
                 You will be notified once approved.
               </AlertDescription>
             </Alert>
@@ -957,7 +793,7 @@ export default function AddPropertyPage() {
     }
   };
 
-  // Show loading state while checking auth
+  // Show loading state
   if (authLoading || isAuthorized === null) {
     return (
       <div className="container mx-auto px-4 py-8 max-w-3xl flex items-center justify-center min-h-[400px]">
@@ -966,12 +802,11 @@ export default function AddPropertyPage() {
     );
   }
 
-  // If not authorized, don't render (redirect will happen)
   if (!isAuthorized) {
     return null;
   }
 
-  // Show verification required message if not verified
+  // Pending verification
   if (isLandlordPending) {
     return (
       <div className="container mx-auto px-4 py-8 max-w-3xl">
@@ -994,7 +829,7 @@ export default function AddPropertyPage() {
             </div>
             <h2 className="text-2xl font-bold mb-2">Verification Pending</h2>
             <p className="text-gray-600 mb-4">
-              Your landlord account is being verified. You will be able to list properties once approved.
+              Your landlord account is being verified. You will be able to list properties in Eswatini once approved.
             </p>
             <Button asChild>
               <Link href="/dashboard/landlord">Go to Dashboard</Link>
@@ -1005,7 +840,7 @@ export default function AddPropertyPage() {
     );
   }
 
-  // Block unverified landlords
+  // Unverified landlord
   if (!isLandlordVerified) {
     return (
       <div className="container mx-auto px-4 py-8 max-w-3xl">
@@ -1028,7 +863,7 @@ export default function AddPropertyPage() {
             </div>
             <h2 className="text-2xl font-bold mb-2">Verification Required</h2>
             <p className="text-gray-600 mb-4">
-              Your landlord account must be verified before you can list properties. Please complete the verification process.
+              Your landlord account must be verified before you can list properties in Eswatini.
             </p>
             <Button asChild>
               <Link href="/dashboard/landlord/verify">Start Verification</Link>
@@ -1049,7 +884,7 @@ export default function AddPropertyPage() {
           </Link>
         </Button>
         <h1 className="text-3xl font-bold">Add New Property</h1>
-        <p className="text-gray-600">List your property on Ekhaya</p>
+        <p className="text-gray-600">List your property on Ekhaya - Eswatini&apos;s property marketplace</p>
       </div>
 
       <div className="mb-8">

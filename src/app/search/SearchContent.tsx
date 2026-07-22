@@ -7,7 +7,8 @@ import { useDebounce } from 'use-debounce';
 import { PropertyCard } from '@/components/properties/PropertyCard';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';import { toast } from 'sonner';
+import { Label } from '@/components/ui/label';
+import { toast } from 'sonner';
 import {
   Select,
   SelectContent,
@@ -936,7 +937,7 @@ export default function SearchContent() {
           ) : (
             <>
               <div className={`grid ${viewMode === 'grid' ? 'md:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'} gap-6`}>
-                <AnimatePresence mode="wait">
+                <AnimatePresence mode="popLayout">
                   {paginatedProperties.map((property) => (
                     <PropertyGridItem key={property.id} property={property} viewMode={viewMode} />
                   ))}
@@ -1067,4 +1068,3 @@ export default function SearchContent() {
     </div>
   );
 }
-

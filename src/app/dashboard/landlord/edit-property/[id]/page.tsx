@@ -1,13 +1,23 @@
 // src/app/dashboard/landlord/edit-property/[id]/page.tsx
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { PropertyType, Property } from '@/types/property';
+import { usePriceInsight } from '@/hooks/usePriceInsight';
+import { useMediaUpload } from '@/hooks/useMediaUpload';
+import {
+  ESWATINI_CITIES,
+  PROPERTY_TYPES,
+  ESWATINI_AMENITIES,
+  ROOM_OPTIONS,
+  BATH_OPTIONS,
+} from '@/utils/constants';
+import { normalizeEswatiniPhone, isValidEswatiniPhone, formatEswatiniPhone } from '@/utils/phone';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -35,46 +45,17 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 
-const CITIES = [
-  'Manzini', 'Mbabane', 'Matsapha', 'Nhlangano', 'Siteki', 
-  'Big Bend', 'Ezulwini', 'Lobamba', 'Piggs Peak', 'Kwaluseni',
-  'Hlatikulu', 'Mhlume', 'Simunye'
-];
-
-const PROPERTY_TYPES: PropertyType[] = [
-  'house', 'flat/apartment', 'shared', 'backrooms', 'other'
-];
-
-const AMENITIES = [
-  'Parking', 'Backup Water', 'Security', 'Garden', 'Furnished',
-  'Built-in Wardrobes', 'Pet Friendly', 'Electric Fence', '24hr Security',
-  'Swimming Pool', 'Staff Quarters', 'Solar Power'
-];
-
-interface PriceInsight {
-  average: number;
-  min: number;
-  max: number;
-  count: number;
-  suggestion: 'low' | 'good' | 'high' | null;
-  message: string;
-}
-
 // Helper to extract storage path from Supabase URL
 const extractStoragePath = (url: string): string | null => {
   try {
     const urlObj = new URL(url);
     const pathParts = urlObj.pathname.split('/');
     
-    // Find the bucket name in the path
-    // Format: /storage/v1/object/public/property-photos/user-id/filename.jpg
     const publicIndex = pathParts.indexOf('public');
     if (publicIndex !== -1 && publicIndex < pathParts.length - 1) {
-      // Get everything after 'public/'
       return pathParts.slice(publicIndex + 1).join('/');
     }
     
-    // Fallback: look for 'property-photos' bucket
     const bucketIndex = pathParts.indexOf('property-photos');
     if (bucketIndex !== -1 && bucketIndex < pathParts.length - 1) {
       return pathParts.slice(bucketIndex + 1).join('/');
@@ -84,18 +65,6 @@ const extractStoragePath = (url: string): string | null => {
   } catch {
     return null;
   }
-};
-
-// Helper to format phone number
-const formatPhoneForDisplay = (phone: string): string => {
-  const cleaned = phone.replace(/\D/g, '');
-  if (cleaned.startsWith('268') && cleaned.length === 11) {
-    return `+${cleaned.slice(0, 3)} ${cleaned.slice(3, 6)} ${cleaned.slice(6)}`;
-  }
-  if (cleaned.length === 8) {
-    return `${cleaned.slice(0, 4)} ${cleaned.slice(4)}`;
-  }
-  return phone;
 };
 
 export default function EditPropertyPage() {
@@ -109,12 +78,11 @@ export default function EditPropertyPage() {
   const [error, setError] = useState<string | null>(null);
   const [property, setProperty] = useState<Property | null>(null);
   const [existingPhotos, setExistingPhotos] = useState<any[]>([]);
-  const [newPhotos, setNewPhotos] = useState<File[]>([]);
-  const [newPhotoPreviews, setNewPhotoPreviews] = useState<string[]>([]);
-  const [priceInsight, setPriceInsight] = useState<PriceInsight | null>(null);
-  const [checkingPrice, setCheckingPrice] = useState(false);
   const [photosToDelete, setPhotosToDelete] = useState<string[]>([]);
-  const priceCheckTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  const { files: newPhotos, previews: newPhotoPreviews, addFiles: addNewPhotos, removeFile: removeNewPhoto } = useMediaUpload({
+    maxFiles: 15,
+  });
 
   const [formData, setFormData] = useState({
     title: '',
@@ -131,6 +99,15 @@ export default function EditPropertyPage() {
     lease_terms: '',
     contact_whatsapp: '',
     contact_phone: '',
+  });
+
+  // Price insight
+  const { priceInsight, checkingPrice, applySuggestedPrice } = usePriceInsight({
+    price: formData.price,
+    city: formData.city,
+    propertyType: formData.property_type,
+    bedrooms: formData.bedrooms,
+    excludePropertyId: propertyId,
   });
 
   // Fetch property data
@@ -185,11 +162,6 @@ export default function EditPropertyPage() {
           contact_whatsapp: data.contact_whatsapp || '',
           contact_phone: data.contact_phone || '',
         });
-
-        // Check price insight
-        if (data.price && data.location_city && data.property_type && data.bedrooms) {
-          await checkPrice(data);
-        }
       } catch (error) {
         console.error('Error fetching property:', error);
         setError('Failed to load property details');
@@ -203,160 +175,6 @@ export default function EditPropertyPage() {
     }
   }, [user, propertyId, authLoading]);
 
-  const checkPrice = async (propertyData: any) => {
-    const price = propertyData.price;
-    if (!price || !propertyData.location_city || !propertyData.property_type || !propertyData.bedrooms) {
-      return;
-    }
-
-    setCheckingPrice(true);
-    try {
-      const { data, error } = await supabase
-        .from('properties')
-        .select('price')
-        .eq('location_city', propertyData.location_city)
-        .eq('property_type', propertyData.property_type)
-        .eq('bedrooms', propertyData.bedrooms)
-        .eq('status', 'active')
-        .neq('id', propertyId)
-        .not('price', 'is', null);
-
-      if (error) throw error;
-
-      if (!data || data.length === 0) {
-        setPriceInsight({
-          average: 0,
-          min: 0,
-          max: 0,
-          count: 0,
-          suggestion: null,
-          message: 'Not enough similar properties to compare pricing.',
-        });
-        return;
-      }
-
-      const prices = data.map((p) => p.price);
-      const avg = prices.reduce((a, b) => a + b, 0) / prices.length;
-      const min = Math.min(...prices);
-      const max = Math.max(...prices);
-
-      let suggestion: 'low' | 'good' | 'high' | null = null;
-      let message = '';
-
-      if (price < min * 0.9) {
-        suggestion = 'low';
-        message = `Your price is below market average (E${avg.toLocaleString()}). You might get interest quickly but could be leaving money on the table.`;
-      } else if (price > max * 1.1) {
-        suggestion = 'high';
-        message = `Your price is above market average (E${avg.toLocaleString()}). This might take longer to rent. Consider E${min.toLocaleString()}-E${max.toLocaleString()}`;
-      } else {
-        suggestion = 'good';
-        message = `Your price is within market range (E${min.toLocaleString()} - E${max.toLocaleString()}). Good job!`;
-      }
-
-      setPriceInsight({
-        average: avg,
-        min,
-        max,
-        count: data.length,
-        suggestion,
-        message,
-      });
-    } catch (error) {
-      console.error('Error checking price:', error);
-    } finally {
-      setCheckingPrice(false);
-    }
-  };
-
-  // Price comparison effect for live updates with cleanup
-  useEffect(() => {
-    if (priceCheckTimeoutRef.current) {
-      clearTimeout(priceCheckTimeoutRef.current);
-    }
-
-    async function checkPriceLive() {
-      const price = parseFloat(formData.price);
-      if (
-        !formData.price ||
-        isNaN(price) ||
-        !formData.city ||
-        !formData.property_type ||
-        !formData.bedrooms
-      ) {
-        setPriceInsight(null);
-        return;
-      }
-
-      setCheckingPrice(true);
-      try {
-        const { data, error } = await supabase
-          .from('properties')
-          .select('price')
-          .eq('location_city', formData.city)
-          .eq('property_type', formData.property_type)
-          .eq('bedrooms', parseInt(formData.bedrooms))
-          .eq('status', 'active')
-          .neq('id', propertyId)
-          .not('price', 'is', null);
-
-        if (error) throw error;
-
-        if (!data || data.length === 0) {
-          setPriceInsight({
-            average: 0,
-            min: 0,
-            max: 0,
-            count: 0,
-            suggestion: null,
-            message: 'Not enough similar properties to compare pricing.',
-          });
-          return;
-        }
-
-        const prices = data.map((p) => p.price);
-        const avg = prices.reduce((a, b) => a + b, 0) / prices.length;
-        const min = Math.min(...prices);
-        const max = Math.max(...prices);
-
-        let suggestion: 'low' | 'good' | 'high' | null = null;
-        let message = '';
-
-        if (price < min * 0.9) {
-          suggestion = 'low';
-          message = `Your price is below market average (E${avg.toLocaleString()}). You might get interest quickly but could be leaving money on the table.`;
-        } else if (price > max * 1.1) {
-          suggestion = 'high';
-          message = `Your price is above market average (E${avg.toLocaleString()}). This might take longer to rent. Consider E${min.toLocaleString()}-E${max.toLocaleString()}`;
-        } else {
-          suggestion = 'good';
-          message = `Your price is within market range (E${min.toLocaleString()} - E${max.toLocaleString()}). Good job!`;
-        }
-
-        setPriceInsight({
-          average: avg,
-          min,
-          max,
-          count: data.length,
-          suggestion,
-          message,
-        });
-      } catch (error) {
-        console.error('Error checking price:', error);
-      } finally {
-        setCheckingPrice(false);
-      }
-    }
-
-    priceCheckTimeoutRef.current = setTimeout(checkPriceLive, 800);
-
-    return () => {
-      if (priceCheckTimeoutRef.current) {
-        clearTimeout(priceCheckTimeoutRef.current);
-      }
-    };
-  }, [formData.price, formData.city, formData.property_type, formData.bedrooms, propertyId]);
-
   const handleAmenityToggle = (amenity: string) => {
     setFormData((prev) => ({
       ...prev,
@@ -367,31 +185,7 @@ export default function EditPropertyPage() {
   };
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    const totalExisting = existingPhotos.length - photosToDelete.length;
-    if (totalExisting + newPhotos.length + files.length > 15) {
-      setError('Maximum 15 photos allowed');
-      return;
-    }
-
-    const validFiles = files.filter((file) => {
-      const isValidType = file.type.startsWith('image/');
-      const isValidSize = file.size <= 5 * 1024 * 1024;
-      if (!isValidType || !isValidSize) {
-        setError('Each photo must be an image under 5MB');
-      }
-      return isValidType && isValidSize;
-    });
-
-    setNewPhotos([...newPhotos, ...validFiles]);
-
-    validFiles.forEach((file) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setNewPhotoPreviews((prev) => [...prev, reader.result as string]);
-      };
-      reader.readAsDataURL(file);
-    });
+    addNewPhotos(e.target.files || []);
   };
 
   const removeExistingPhoto = (photoId: string) => {
@@ -402,45 +196,15 @@ export default function EditPropertyPage() {
     setPhotosToDelete(photosToDelete.filter((id) => id !== photoId));
   };
 
-  const removeNewPhoto = (index: number) => {
-    setNewPhotos(newPhotos.filter((_, i) => i !== index));
-    setNewPhotoPreviews(newPhotoPreviews.filter((_, i) => i !== index));
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setFormData(prev => ({ ...prev, contact_phone: normalizeEswatiniPhone(value) }));
   };
 
-  const applySuggestedPrice = () => {
-    if (priceInsight && priceInsight.count > 0) {
-      const suggestedPrice = Math.round(
-        (priceInsight.min + priceInsight.max) / 2,
-      );
-      setFormData({ ...formData, price: suggestedPrice.toString() });
-      toast.success('Suggested price applied');
-    }
+  const handleWhatsAppChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setFormData(prev => ({ ...prev, contact_whatsapp: normalizeEswatiniPhone(value) }));
   };
-
-  // Clean up newly uploaded photos if update fails
-  const cleanupNewPhotos = useCallback(async (photoUrls: string[]) => {
-    if (photoUrls.length === 0) return;
-
-    try {
-      const filePaths = photoUrls
-        .map(url => extractStoragePath(url))
-        .filter((path): path is string => path !== null);
-
-      if (filePaths.length > 0) {
-        const { error } = await supabase.storage
-          .from('property-photos')
-          .remove(filePaths);
-        
-        if (error) {
-          console.error('Error cleaning up photos:', error);
-        } else {
-          console.log(`Cleaned up ${filePaths.length} orphaned photos`);
-        }
-      }
-    } catch (error) {
-      console.error('Error during photo cleanup:', error);
-    }
-  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -459,7 +223,12 @@ export default function EditPropertyPage() {
         return;
       }
 
-      // Parse price
+      if (!isValidEswatiniPhone(formData.contact_phone)) {
+        setError('Please enter a valid Eswatini phone number (e.g., +268 7600 0000)');
+        setSaving(false);
+        return;
+      }
+
       const price = parseFloat(formData.price);
       if (isNaN(price) || price <= 0) {
         setError('Please enter a valid price');
@@ -467,12 +236,7 @@ export default function EditPropertyPage() {
         return;
       }
 
-      // 1. Store photos that will be deleted for rollback
-      const photosToDeleteData = existingPhotos.filter(p => 
-        photosToDelete.includes(p.id)
-      );
-
-      // 2. Upload new photos first (so we can rollback if property update fails)
+      // 1. Upload new photos
       const photoUrls: string[] = [];
 
       if (newPhotos.length > 0) {
@@ -485,21 +249,34 @@ export default function EditPropertyPage() {
             .upload(fileName, photo);
 
           if (uploadError) {
-            // Clean up any photos that were already uploaded
-            await cleanupNewPhotos(photoUrls);
+            // Clean up uploaded photos
+            if (uploadedPhotoUrls.length > 0) {
+              const paths = uploadedPhotoUrls.map(url => {
+                const parts = url.split('/');
+                const publicIndex = parts.indexOf('public');
+                if (publicIndex !== -1) {
+                  return parts.slice(publicIndex + 1).join('/');
+                }
+                return null;
+              }).filter((path): path is string => path !== null);
+              
+              if (paths.length > 0) {
+                await supabase.storage.from('property-photos').remove(paths);
+              }
+            }
             throw new Error(`Failed to upload photo: ${uploadError.message}`);
           }
 
-          const {
-            data: { publicUrl },
-          } = supabase.storage.from('property-photos').getPublicUrl(fileName);
+          const { data: { publicUrl } } = supabase.storage
+            .from('property-photos')
+            .getPublicUrl(fileName);
 
           photoUrls.push(publicUrl);
           uploadedPhotoUrls = [...photoUrls];
         }
       }
 
-      // 3. Update property
+      // 2. Update property
       const { error: updateError } = await supabase
         .from('properties')
         .update({
@@ -516,18 +293,32 @@ export default function EditPropertyPage() {
           amenities: formData.amenities,
           lease_terms: formData.lease_terms.trim() || null,
           contact_whatsapp: formData.contact_whatsapp.trim() || null,
-          contact_phone: formData.contact_phone.trim(),
+          contact_phone: normalizeEswatiniPhone(formData.contact_phone.trim()),
           updated_at: new Date().toISOString(),
+          country: 'Eswatini',
         })
         .eq('id', propertyId);
 
       if (updateError) {
         // Rollback: Delete newly uploaded photos
-        await cleanupNewPhotos(uploadedPhotoUrls);
+        if (uploadedPhotoUrls.length > 0) {
+          const paths = uploadedPhotoUrls.map(url => {
+            const parts = url.split('/');
+            const publicIndex = parts.indexOf('public');
+            if (publicIndex !== -1) {
+              return parts.slice(publicIndex + 1).join('/');
+            }
+            return null;
+          }).filter((path): path is string => path !== null);
+          
+          if (paths.length > 0) {
+            await supabase.storage.from('property-photos').remove(paths);
+          }
+        }
         throw new Error(`Failed to update property: ${updateError.message}`);
       }
 
-      // 4. Add new photos to database
+      // 3. Add new photos to database
       if (photoUrls.length > 0) {
         const currentPhotoCount = existingPhotos.length - photosToDelete.length;
         const photoRecords = photoUrls.map((url, index) => ({
@@ -543,39 +334,41 @@ export default function EditPropertyPage() {
 
         if (photosError) {
           // Rollback: Delete uploaded photos from storage
-          await cleanupNewPhotos(uploadedPhotoUrls);
+          if (uploadedPhotoUrls.length > 0) {
+            const paths = uploadedPhotoUrls.map(url => {
+              const parts = url.split('/');
+              const publicIndex = parts.indexOf('public');
+              if (publicIndex !== -1) {
+                return parts.slice(publicIndex + 1).join('/');
+              }
+              return null;
+            }).filter((path): path is string => path !== null);
+            
+            if (paths.length > 0) {
+              await supabase.storage.from('property-photos').remove(paths);
+            }
+          }
           throw new Error(`Failed to save photo records: ${photosError.message}`);
         }
       }
 
-      // 5. Delete removed photos from storage and database
-      // Only after everything else succeeded
+      // 4. Delete removed photos
       if (photosToDelete.length > 0) {
         for (const photoId of photosToDelete) {
           const photo = existingPhotos.find(p => p.id === photoId);
           if (photo) {
             // Delete from database
-            const { error: deleteError } = await supabase
+            await supabase
               .from('property_photos')
               .delete()
               .eq('id', photoId);
 
-            if (deleteError) {
-              console.error('Error deleting photo from database:', deleteError);
-              // Continue with other deletions
-            }
-
             // Delete from storage
             const storagePath = extractStoragePath(photo.photo_url);
             if (storagePath) {
-              const { error: storageError } = await supabase.storage
+              await supabase.storage
                 .from('property-photos')
                 .remove([storagePath]);
-
-              if (storageError) {
-                console.error('Error deleting photo from storage:', storageError);
-                // Continue with other deletions
-              }
             }
           }
         }
@@ -628,7 +421,7 @@ export default function EditPropertyPage() {
     );
   }
 
-  const displayPhone = formatPhoneForDisplay(formData.contact_phone);
+  const displayPhone = formatEswatiniPhone(formData.contact_phone);
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-3xl">
@@ -640,7 +433,7 @@ export default function EditPropertyPage() {
           </Link>
         </Button>
         <h1 className="text-3xl font-bold">Edit Property</h1>
-        <p className="text-gray-600">Update your property listing</p>
+        <p className="text-gray-600">Update your property listing in Eswatini</p>
       </div>
 
       <form onSubmit={handleSubmit}>
@@ -712,7 +505,7 @@ export default function EditPropertyPage() {
                 {checkingPrice && (
                   <div className="mt-2 flex items-center text-sm text-gray-500">
                     <Loader2 className="h-3 w-3 animate-spin mr-2" />
-                    Analyzing market prices...
+                    Analyzing Eswatini market prices...
                   </div>
                 )}
 
@@ -741,7 +534,7 @@ export default function EditPropertyPage() {
                       <div className="flex-1">
                         <p className="text-sm font-medium">
                           Based on {priceInsight.count} similar properties in{' '}
-                          {formData.city}
+                          {formData.city}, Eswatini
                         </p>
                         <p className="text-sm mt-1">{priceInsight.message}</p>
                         <div className="flex items-center gap-4 mt-2 text-xs text-gray-600">
@@ -761,7 +554,13 @@ export default function EditPropertyPage() {
                             variant="link"
                             size="sm"
                             className="mt-2 h-auto p-0 text-primary"
-                            onClick={applySuggestedPrice}
+                            onClick={() => {
+                              const suggested = applySuggestedPrice();
+                              if (suggested) {
+                                setFormData(prev => ({ ...prev, price: suggested.toString() }));
+                                toast.success('Suggested price applied');
+                              }
+                            }}
                           >
                             Apply suggested price
                           </Button>
@@ -773,8 +572,7 @@ export default function EditPropertyPage() {
 
                 {priceInsight && priceInsight.count === 0 && (
                   <p className="mt-2 text-sm text-gray-500">
-                    No similar properties found in {formData.city} to compare
-                    pricing.
+                    No similar properties found in {formData.city}, Eswatini to compare pricing.
                   </p>
                 )}
 
@@ -807,10 +605,10 @@ export default function EditPropertyPage() {
                     }
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select city" />
+                      <SelectValue placeholder="Select city in Eswatini" />
                     </SelectTrigger>
                     <SelectContent>
-                      {CITIES.map((city) => (
+                      {ESWATINI_CITIES.map((city) => (
                         <SelectItem key={city} value={city}>
                           {city}
                         </SelectItem>
@@ -866,10 +664,9 @@ export default function EditPropertyPage() {
                         <SelectValue placeholder="Select" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">None</SelectItem>
-                        {[1, 2, 3, 4, 5].map((num) => (
-                          <SelectItem key={num} value={num.toString()}>
-                            {num}
+                        {ROOM_OPTIONS.map((num) => (
+                          <SelectItem key={num} value={num}>
+                            {num === '0' ? 'None' : num}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -888,10 +685,9 @@ export default function EditPropertyPage() {
                         <SelectValue placeholder="Select" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">None</SelectItem>
-                        {[1, 2, 3, 4].map((num) => (
-                          <SelectItem key={num} value={num.toString()}>
-                            {num}
+                        {BATH_OPTIONS.map((num) => (
+                          <SelectItem key={num} value={num}>
+                            {num === '0' ? 'None' : num}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -913,7 +709,7 @@ export default function EditPropertyPage() {
                 <div>
                   <Label>Amenities</Label>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-2">
-                    {AMENITIES.map((amenity) => (
+                    {ESWATINI_AMENITIES.map((amenity) => (
                       <div key={amenity} className="flex items-center space-x-2">
                         <Checkbox
                           id={`amenity-${amenity}`}
@@ -1082,9 +878,7 @@ export default function EditPropertyPage() {
                     type="tel"
                     placeholder="+268 7600 0000"
                     value={formData.contact_phone}
-                    onChange={(e) =>
-                      setFormData({ ...formData, contact_phone: e.target.value })
-                    }
+                    onChange={handlePhoneChange}
                     required
                   />
                   {formData.contact_phone && (
@@ -1101,12 +895,7 @@ export default function EditPropertyPage() {
                     type="tel"
                     placeholder="+268 7600 0000"
                     value={formData.contact_whatsapp}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        contact_whatsapp: e.target.value,
-                      })
-                    }
+                    onChange={handleWhatsAppChange}
                   />
                 </div>
               </div>

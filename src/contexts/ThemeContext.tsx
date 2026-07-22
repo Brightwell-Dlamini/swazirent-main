@@ -15,7 +15,7 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false);
-  const [theme, setTheme] = useState<Theme>('light'); // Safe default for SSR
+  const [theme, setTheme] = useState<Theme>('dark'); // ← Changed default to 'dark'
 
   // Read theme from localStorage only after mounting
   useEffect(() => {
@@ -26,7 +26,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       '(prefers-color-scheme: dark)',
     ).matches;
     
-    const initialTheme = savedTheme || (systemPrefersDark ? 'dark' : 'light');
+    // Priority: saved theme > system preference > dark (default)
+    const initialTheme = savedTheme || (systemPrefersDark ? 'dark' : 'dark');
     setTheme(initialTheme);
   }, []);
 
@@ -51,7 +52,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   // Prevent hydration mismatch by returning children without theme context initially
   if (!mounted) {
     return (
-      <ThemeContext.Provider value={{ theme: 'light', toggleTheme, mounted: false }}>
+      <ThemeContext.Provider value={{ theme: 'dark', toggleTheme, mounted: false }}>
         {children}
       </ThemeContext.Provider>
     );

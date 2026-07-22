@@ -1,13 +1,11 @@
-// src/components/auth/SocialLoginButtons.tsx
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2 } from 'lucide-react';
 import { FaGoogle } from 'react-icons/fa';
-import { useSearchParams } from 'next/navigation';
 
 interface SocialLoginButtonsProps {
   isLoading?: boolean;
@@ -22,16 +20,45 @@ export default function SocialLoginButtons({
 }: SocialLoginButtonsProps) {
   const [loadingProvider, setLoadingProvider] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const searchParams = useSearchParams();
+  const [redirectUrl, setRedirectUrl] = useState<string>('');
+
+  useEffect(() => {
+    const getRedirectUrl = () => {
+      // For Vercel deployments (Production, Preview, etc.)
+      if (process.env.NEXT_PUBLIC_VERCEL_URL) {
+        return `https://${process.env.NEXT_PUBLIC_VERCEL_URL}/auth/callback`;
+      }
+      
+      // For custom domain with explicit APP_URL
+      if (process.env.NEXT_PUBLIC_APP_URL) {
+        return `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback`;
+      }
+      
+      // For local development
+      if (typeof window !== 'undefined') {
+        return `${window.location.origin}/auth/callback`;
+      }
+      
+      // Ultimate fallback
+      return '/auth/callback';
+    };
+    
+    setRedirectUrl(getRedirectUrl());
+  }, []);
 
   const handleGoogleLogin = async () => {
+    if (!redirectUrl) {
+      setError('Redirect URL not configured. Please try again.');
+      return;
+    }
+
     setLoadingProvider('google');
     setError(null);
 
     try {
-      const redirectUrl = `${window.location.origin}/auth/callback`;
+      console.log('🔑 Google OAuth Redirect URL:', redirectUrl);
 
-      const { error } = await supabase.auth.signInWithOAuth({
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
           redirectTo: redirectUrl,
@@ -43,10 +70,14 @@ export default function SocialLoginButtons({
       });
 
       if (error) {
+        console.error('Supabase OAuth error:', error);
+        
         if (error.message.includes('provider is not enabled')) {
           setError('Google login is not enabled. Please contact support.');
         } else if (error.message.includes('invalid client')) {
           setError('Google configuration is invalid. Please try again later.');
+        } else if (error.message.includes('redirect_uri_mismatch')) {
+          setError('Redirect URL mismatch. Please ensure both the app and Google Cloud Console have the correct URLs configured.');
         } else {
           setError(error.message);
         }
@@ -55,9 +86,11 @@ export default function SocialLoginButtons({
         return;
       }
 
+      console.log('✅ OAuth initiated successfully:', data);
       onSuccess?.();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to sign in with Google';
+      console.error('Google sign-in error:', error);
       setError(message);
       onError?.(message);
       setLoadingProvider(null);
@@ -79,7 +112,7 @@ export default function SocialLoginButtons({
         variant="outline"
         className="w-full relative h-11"
         onClick={handleGoogleLogin}
-        disabled={isGoogleLoading}
+        disabled={isGoogleLoading || !redirectUrl}
       >
         {isGoogleLoading ? (
           <Loader2 className="mr-2 h-4 w-4 animate-spin" />

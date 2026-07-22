@@ -1,5 +1,5 @@
-export type PropertyType = 'house' | 'flat/apartment' | 'shared' | 'backrooms' | 'other'
-
+// src/types/property.ts
+export type PropertyType = 'house' | 'flat/apartment' | 'shared' | 'backrooms' | 'other';
 
 export type PropertyStatus = 'active' | 'pending' | 'rejected' | 'rented' | 'reported';
 
@@ -25,13 +25,14 @@ export interface Property {
     views: number
     created_at: string
     updated_at: string
-    contact_phone: string  // Add this
-    contact_whatsapp?: string  // Add this
-    // Joined fields
+    contact_phone: string
+    contact_whatsapp?: string
+    country?: string
     landlord?: {
         full_name: string
         phone: string
         is_verified: boolean
+        email?: string  // Added email field
     }
     photos?: PropertyPhoto[]
 }

@@ -1,7 +1,6 @@
 // src/app/layout.tsx
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
-// Ignore TypeScript complaints about side-effect CSS import
 // @ts-ignore
 import './globals.css';
 import { ThemeProvider } from '@/contexts/ThemeContext';
@@ -10,6 +9,7 @@ import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { BackToTop } from '@/components/ui/BackToTop';
 import { Toaster } from 'sonner';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -29,22 +29,24 @@ export default function RootLayout({
       <body className={inter.className}>
         <ThemeProvider>
           <AuthProvider>
-            <Header />
-            {children}
-            <Footer />
-            <BackToTop />
-            <Toaster 
-              position="top-right"
-              richColors
-              closeButton
-              toastOptions={{
-                style: {
-                  background: 'var(--background)',
-                  color: 'var(--foreground)',
-                  border: '1px solid var(--border)',
-                },
-              }}
-            />
+            <ErrorBoundary>
+              <Header />
+              {children}
+              <Footer />
+              <BackToTop />
+              <Toaster 
+                position="top-right"
+                richColors
+                closeButton
+                toastOptions={{
+                  style: {
+                    background: 'var(--background)',
+                    color: 'var(--foreground)',
+                    border: '1px solid var(--border)',
+                  },
+                }}
+              />
+            </ErrorBoundary>
           </AuthProvider>
         </ThemeProvider>
       </body>

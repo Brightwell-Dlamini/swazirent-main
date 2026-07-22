@@ -36,54 +36,12 @@ import { supabase } from '@/lib/supabase';
 import { Property, PropertyPhoto } from '@/types/property';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+import { normalizeEswatiniPhone, formatEswatiniPhone } from '@/utils/phone';
 
 // Helper to get primary photo
 const getPrimaryPhoto = (photos?: PropertyPhoto[]) => {
   if (!photos || photos.length === 0) return null;
   return [...photos].sort((a, b) => a.display_order - b.display_order)[0];
-};
-
-// Helper to format phone number for WhatsApp
-const formatWhatsAppNumber = (phone: string): string => {
-  // Remove all non-digits
-  const cleaned = phone.replace(/\D/g, '');
-  
-  // If number starts with 0, assume it's a local number without country code
-  if (cleaned.startsWith('0')) {
-    // Remove leading 0 and add Eswatini country code
-    return `268${cleaned.substring(1)}`;
-  }
-  
-  // If number already has country code (starts with 268)
-  if (cleaned.startsWith('268')) {
-    return cleaned;
-  }
-  
-  // If number is 8 digits (local format without 0), add country code
-  if (cleaned.length === 8) {
-    return `268${cleaned}`;
-  }
-  
-  // Return as-is if we can't determine
-  return cleaned;
-};
-
-// Helper to format phone number for display
-const formatPhoneForDisplay = (phone: string): string => {
-  const cleaned = phone.replace(/\D/g, '');
-  
-  // If it's an Eswatini number with country code
-  if (cleaned.startsWith('268') && cleaned.length === 11) {
-    return `+${cleaned.slice(0, 3)} ${cleaned.slice(3, 6)} ${cleaned.slice(6)}`;
-  }
-  
-  // If it's a local number without country code
-  if (cleaned.length === 8) {
-    return `${cleaned.slice(0, 4)} ${cleaned.slice(4)}`;
-  }
-  
-  // Return as-is
-  return phone;
 };
 
 export default function PublicPropertyPage() {
@@ -194,7 +152,43 @@ export default function PublicPropertyPage() {
     }
   }, [params.id, user]);
 
-  // Atomic view counter using RPC
+  // Atomic view counter with improved fallback
+  const recordViewWithFallback = async (propertyId: string) => {
+    try {
+      // First try: Get current view count and increment
+      const { data: currentData, error: fetchError } = await supabase
+        .from('properties')
+        .select('views')
+        .eq('id', propertyId)
+        .single();
+
+      if (fetchError) {
+        console.error('Error fetching current views:', fetchError);
+        // If we can't get current views, mark as viewed anyway
+        setViewRecorded(true);
+        return;
+      }
+
+      const currentViews = currentData?.views || 0;
+      const { error: updateError } = await supabase
+        .from('properties')
+        .update({ views: currentViews + 1 })
+        .eq('id', propertyId);
+
+      if (updateError) {
+        console.error('Error updating views:', updateError);
+        // Mark as viewed anyway to prevent repeated attempts
+        setViewRecorded(true);
+        return;
+      }
+
+      setViewRecorded(true);
+    } catch (error) {
+      console.error('Error in fallback view recording:', error);
+      setViewRecorded(true);
+    }
+  };
+
   const recordView = async (propertyId: string) => {
     if (viewRecorded) return;
     
@@ -206,50 +200,13 @@ export default function PublicPropertyPage() {
 
       if (rpcError) {
         console.warn('RPC function not available, using fallback:', rpcError.message);
-        // Fallback: try direct update or use separate table
         await recordViewWithFallback(propertyId);
       } else {
         setViewRecorded(true);
       }
     } catch (error) {
       console.error('Error recording view:', error);
-      // Try fallback on any error
       await recordViewWithFallback(propertyId);
-    }
-  };
-
-  // Fallback method for recording views
-  const recordViewWithFallback = async (propertyId: string) => {
-    try {
-      // Try direct update first
-      const { error: updateError } = await supabase
-        .from('properties')
-        .update({ views: supabase.rpc('increment', { row_count: 1 }) })
-        .eq('id', propertyId);
-
-      if (updateError) {
-        // If that fails, try with a separate views table
-        const { error: insertError } = await supabase
-          .from('property_views')
-          .insert([{
-            property_id: propertyId,
-            viewed_at: new Date().toISOString(),
-            viewer_id: user?.id || null,
-          }]);
-
-        if (insertError) {
-          console.error('Error inserting view record:', insertError);
-          // Final fallback: just mark as viewed without persisting
-          setViewRecorded(true);
-          return;
-        }
-      }
-
-      setViewRecorded(true);
-    } catch (error) {
-      console.error('Error in fallback view recording:', error);
-      // Mark as viewed anyway to prevent repeated attempts
-      setViewRecorded(true);
     }
   };
 
@@ -292,16 +249,16 @@ export default function PublicPropertyPage() {
     if (!property) return;
 
     if (method === 'phone') {
-      const phoneNumber = property.contact_phone.replace(/\s/g, '');
+      const phoneNumber = normalizeEswatiniPhone(property.contact_phone);
       window.location.href = `tel:${phoneNumber}`;
     } else if (method === 'whatsapp') {
       const message = encodeURIComponent(
         `Hello, I'm interested in your property: ${property.title} (E${property.price}/month)`,
       );
       const phone = property.contact_whatsapp || property.contact_phone;
-      const formattedPhone = formatWhatsAppNumber(phone);
+      const formattedPhone = normalizeEswatiniPhone(phone);
       window.open(
-        `https://wa.me/${formattedPhone}?text=${message}`,
+        `https://wa.me/${formattedPhone.replace('+', '')}?text=${message}`,
         '_blank',
       );
     } else if (method === 'email') {
@@ -430,7 +387,7 @@ export default function PublicPropertyPage() {
 
   const primaryPhoto = getPrimaryPhoto(property.photos);
   const photoUrls = property.photos?.map(p => p.photo_url) || [];
-  const displayPhone = formatPhoneForDisplay(property.contact_phone);
+  const displayPhone = formatEswatiniPhone(property.contact_phone);
   const landlordEmail = (property.landlord as { email?: string } | undefined)?.email;
 
   return (
@@ -738,7 +695,7 @@ export default function PublicPropertyPage() {
                       Call {displayPhone}
                     </Button>
 
-y                    <Button
+                    <Button
                       variant="outline"
                       className="w-full h-12 text-base"
                       onClick={() => handleContact('email')}

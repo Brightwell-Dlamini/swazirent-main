@@ -1,4 +1,4 @@
-// src/app/auth/signup/SignUpForm.tsx (updated with Google login)
+// src/app/auth/signup/SignUpForm.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -119,8 +119,11 @@ export default function SignUpForm() {
       if (error instanceof z.ZodError) {
         const errors: Record<string, string> = {};
         error.issues.forEach((issue: z.ZodIssue) => {
-          if (issue.path[0]) {
-            errors[issue.path[0].toString()] = issue.message;
+          const path = issue.path[0];
+          if (path) {
+            errors[path.toString()] = issue.message;
+          } else {
+            errors.general = issue.message;
           }
         });
         setValidationErrors(errors);
@@ -155,10 +158,15 @@ export default function SignUpForm() {
         setIsLoading(false);
         return;
       }
+
+      setSuccessState({
+        type: 'verification',
+        message: 'Please check your email to verify your account.',
+      });
+      
     } catch (error: unknown) {
       console.error('Signup error:', error);
       setError(error instanceof Error ? error.message : 'An error occurred during signup');
-      setIsLoading(false);
     } finally {
       setIsLoading(false);
     }
@@ -240,7 +248,6 @@ export default function SignUpForm() {
           </CardHeader>
           <CardContent>
             <div className="space-y-6">
-              {/* Google Login Button */}
               <SocialLoginButtons 
                 isLoading={isLoading || authLoading}
                 onError={handleSocialLoginError}
@@ -253,7 +260,6 @@ export default function SignUpForm() {
                   </Alert>
                 )}
 
-                {/* User Type Selection */}
                 <div className="grid grid-cols-2 gap-4">
                   <Button
                     type="button"
@@ -279,7 +285,6 @@ export default function SignUpForm() {
                   </Button>
                 </div>
 
-                {/* Full Name */}
                 <div className="space-y-2">
                   <Label htmlFor="fullName">Full Name</Label>
                   <Input
@@ -299,7 +304,6 @@ export default function SignUpForm() {
                   )}
                 </div>
 
-                {/* Email */}
                 <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
                   <Input
@@ -320,7 +324,6 @@ export default function SignUpForm() {
                   )}
                 </div>
 
-                {/* Phone */}
                 <div className="space-y-2">
                   <Label htmlFor="phone">Phone Number</Label>
                   <Input
@@ -342,7 +345,6 @@ export default function SignUpForm() {
                   </p>
                 </div>
 
-                {/* Password */}
                 <div className="space-y-2">
                   <Label htmlFor="password">Password</Label>
                   <Input
@@ -366,7 +368,6 @@ export default function SignUpForm() {
                   </p>
                 </div>
 
-                {/* Confirm Password */}
                 <div className="space-y-2">
                   <Label htmlFor="confirmPassword">Confirm Password</Label>
                   <Input
@@ -392,7 +393,6 @@ export default function SignUpForm() {
                   )}
                 </div>
 
-                {/* Terms and Conditions */}
                 <div className="flex items-center space-x-2">
                   <Checkbox
                     id="terms"
