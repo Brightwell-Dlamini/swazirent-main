@@ -338,6 +338,7 @@ export default function SuperAdminDashboard() {
         ...bookingStats,
         ...revenueStats,
         ...analyticsStats,
+        pendingReports: reportsList.length,
         platformHealth: {
           status: platformHealth.status as PlatformHealthStatus,
           uptime: platformHealth.uptime,
