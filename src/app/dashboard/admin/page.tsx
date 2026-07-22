@@ -124,7 +124,7 @@ import {
   Droplets,
   Umbrella,
   Leaf,
-  Tree,
+  Trees, // ← Changed from 'Tree' to 'Trees'
   Flower,
   Mountain,
   Waves,
