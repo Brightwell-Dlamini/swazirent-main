@@ -49,7 +49,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertDialog,
@@ -130,6 +130,10 @@ const MOCK_NOTIFICATIONS: Notification[] = [
   },
 ];
 
+// File validation constants
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const ALLOWED_FILE_TYPES = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf'];
+
 // Skeleton loader for auth buttons
 const AuthSkeleton = () => (
   <div className="hidden md:flex items-center space-x-2">
@@ -194,6 +198,20 @@ const NotificationItem = ({
           onClose();
         }
       }}
+      role="button"
+      tabIndex={0}
+      aria-label={`Notification: ${notification.title}`}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          if (!notification.read) {
+            onMarkAsRead(notification.id);
+          }
+          if (notification.link) {
+            onClose();
+          }
+        }
+      }}
     >
       <div className="shrink-0 mt-0.5">
         <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
@@ -220,6 +238,7 @@ const NotificationItem = ({
   );
 };
 
+// Main Header Component
 export function Header() {
   const router = useRouter();
   const pathname = usePathname();
@@ -247,14 +266,39 @@ export function Header() {
     proofOfAddress: null,
     businessLicense: null,
   });
+  
+  // Ref for keyboard handling
+  const headerRef = useRef<HTMLElement>(null);
 
   // Close mobile menu on route change
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [pathname]);
 
+  // Keyboard event handler for Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setMobileMenuOpen(false);
+        setShowUpgradeDialog(false);
+        setShowVerificationDialog(false);
+      }
+    };
+    
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // ONLY show loading on initial page load, never on tab switches
   const showLoading = !isInitialized && isLoading;
+
+  // Memoize verification status to prevent unnecessary re-renders
+  const verificationStatus = useMemo(() => ({
+    status,
+    isLandlordVerified,
+    isLandlordPending,
+    isLandlordRejected,
+  }), [status, isLandlordVerified, isLandlordPending, isLandlordRejected]);
 
   const getUserInitials = () => {
     if (!user?.email) return 'U';
@@ -275,26 +319,37 @@ export function Header() {
     router.push(`/auth/upgrade?email=${encodeURIComponent(email)}`);
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'idDocument' | 'proofOfAddress' | 'businessLicense') => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 10 * 1024 * 1024) {
-        toast.error('File size must be under 10MB');
-        return;
-      }
-      setVerificationDocs(prev => ({ ...prev, [type]: file }));
+  // File validation with proper types
+  const validateFile = (file: File): boolean => {
+    if (!ALLOWED_FILE_TYPES.includes(file.type)) {
+      toast.error('Please upload a JPEG, PNG, or PDF file');
+      return false;
     }
+    if (file.size > MAX_FILE_SIZE) {
+      toast.error('File size must be under 10MB');
+      return false;
+    }
+    return true;
   };
 
-  // ✅ FIXED: Handle submit verification - call with correct arguments
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>, type: 'idDocument' | 'proofOfAddress' | 'businessLicense') => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!validateFile(file)) {
+      e.target.value = ''; // Reset input
+      return;
+    }
+
+    setVerificationDocs(prev => ({ ...prev, [type]: file }));
+  }, []);
+
   const handleSubmitVerification = async () => {
     if (!verificationDocs.idDocument) {
       toast.error('Please upload an ID document');
       return;
     }
 
-    // ✅ Use the submitVerification function from the hook
-    // The hook handles the actual upload and submission
     const success = await submitVerification({
       idDocument: verificationDocs.idDocument,
       proofOfAddress: verificationDocs.proofOfAddress || undefined,
@@ -314,7 +369,7 @@ export function Header() {
     }
   };
 
-  const handleListProperty = (e: React.MouseEvent) => {
+  const handleListProperty = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
 
@@ -369,24 +424,27 @@ export function Header() {
     }
 
     setMobileMenuOpen(false);
-  };
+  }, [user, userType, isLandlordVerified, isLandlordPending, isLandlordRejected, router]);
 
-  const handleNotificationClick = (id: string) => {
+  const handleNotificationClick = useCallback((id: string) => {
     setNotifications(prev => 
       prev.map(n => n.id === id ? { ...n, read: true } : n)
     );
-  };
+  }, []);
 
-  const handleMarkAllAsRead = () => {
+  const handleMarkAllAsRead = useCallback(() => {
     setNotifications(prev => 
       prev.map(n => ({ ...n, read: true }))
     );
     toast.success('All notifications marked as read');
-  };
+  }, []);
 
-  const unreadCount = notifications.filter(n => !n.read).length;
+  const unreadCount = useMemo(() => 
+    notifications.filter(n => !n.read).length,
+    [notifications]
+  );
 
-  const getListPropertyButtonContent = () => {
+  const getListPropertyButtonContent = useCallback(() => {
     if (!user) {
       return {
         icon: PlusCircle,
@@ -458,21 +516,21 @@ export function Header() {
       badge: null,
       tooltip: 'List a property',
     };
-  };
+  }, [user, userType, isLandlordVerified, isLandlordPending, isLandlordRejected]);
 
   const buttonContent = getListPropertyButtonContent();
   const ButtonIcon = buttonContent.icon;
 
-  const navLinks = [
+  const navLinks = useMemo(() => [
     { href: '/search', label: 'Search', icon: Search },
     { href: '/about', label: 'About', icon: null },
     { href: '/contact', label: 'Contact', icon: null },
-  ];
+  ], []);
 
-  const isActiveLink = (href: string) => {
+  const isActiveLink = useCallback((href: string) => {
     if (href === '/search' && pathname?.startsWith('/search')) return true;
     return pathname === href;
-  };
+  }, [pathname]);
 
   const headerVariants = {
     initial: { y: -100 },
@@ -494,10 +552,18 @@ export function Header() {
 
   return (
     <>
+      {/* Skip Link for Accessibility */}
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:top-16 focus:left-4 focus:z-[100] focus:bg-white dark:focus:bg-gray-900 focus:p-4 focus:rounded-lg focus:shadow-lg">
+        Skip to main content
+      </a>
+
       <motion.header
+        ref={headerRef}
         variants={headerVariants}
         initial="initial"
         animate="animate"
+        role="banner"
+        aria-label="Main navigation"
         className="fixed top-0 left-0 right-0 z-50 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm border-b border-gray-200 dark:border-gray-800"
       >
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -524,7 +590,7 @@ export function Header() {
           </div>
 
           {/* Desktop Navigation - Hidden on mobile */}
-          <nav className="hidden md:flex items-center space-x-1">
+          <nav className="hidden md:flex items-center space-x-1" role="navigation" aria-label="Primary navigation">
             {navLinks.map((link) => {
               const Icon = link.icon;
               const isActive = isActiveLink(link.href);
@@ -541,6 +607,7 @@ export function Header() {
                       : 'text-gray-700 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400'
                     }
                   `}
+                  aria-current={isActive ? 'page' : undefined}
                 >
                   <span className="flex items-center space-x-1">
                     {Icon && (
@@ -582,6 +649,7 @@ export function Header() {
                 hover:shadow-md
               `}
               title={buttonContent.tooltip}
+              aria-label={buttonContent.tooltip}
             >
               <ButtonIcon className="h-4 w-4 transition-transform duration-200 group-hover:scale-110" />
               <span className="hidden xl:inline">{buttonContent.text}</span>
@@ -636,7 +704,7 @@ export function Header() {
                       variant="ghost"
                       size="icon"
                       className="relative rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 h-8 w-8 sm:h-9 sm:w-9"
-                      aria-label="Notifications"
+                      aria-label={`Notifications (${unreadCount} unread)`}
                     >
                       <Bell className="h-4 w-4 sm:h-5 sm:w-5" />
                       {unreadCount > 0 && (
@@ -927,7 +995,7 @@ export function Header() {
                     variant="ghost"
                     size="icon"
                     className="md:hidden hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 relative h-8 w-8 sm:h-9 sm:w-9"
-                    aria-label="Open menu"
+                    aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
                   >
                     <AnimatePresence mode="wait">
                       {mobileMenuOpen ? (
@@ -985,7 +1053,7 @@ export function Header() {
                   </Button>
                 </div>
 
-                <nav className="flex flex-col p-3 sm:p-4 overflow-y-auto max-h-[calc(100vh-200px)]">
+                <nav className="flex flex-col p-3 sm:p-4 overflow-y-auto max-h-[calc(100vh-200px)]" role="navigation" aria-label="Mobile navigation">
                   <AnimatePresence>
                     {navLinks.map((link, index) => {
                       const Icon = link.icon;
@@ -1011,6 +1079,7 @@ export function Header() {
                               }
                             `}
                             onClick={() => setMobileMenuOpen(false)}
+                            aria-current={isActive ? 'page' : undefined}
                           >
                             {Icon && (
                               <Icon
@@ -1050,6 +1119,7 @@ export function Header() {
                           ${buttonContent.bgColor}
                           hover:shadow-md
                         `}
+                        aria-label={buttonContent.tooltip}
                       >
                         <ButtonIcon className="h-4 w-4 sm:h-5 sm:w-5 transition-transform group-hover:scale-110" />
                         <span className="flex-1 font-medium">{buttonContent.text}</span>
@@ -1071,6 +1141,7 @@ export function Header() {
                           setMobileMenuOpen(false);
                         }}
                         className="flex items-center space-x-3 p-3 sm:p-4 rounded-xl w-full text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-all duration-200 group text-sm sm:text-base"
+                        aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
                       >
                         {theme === 'light' ? (
                           <>
@@ -1155,6 +1226,7 @@ export function Header() {
                             setMobileMenuOpen(false);
                           }}
                           className="flex items-center space-x-3 p-3 rounded-xl w-full text-left text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/50 transition-all duration-200 text-sm sm:text-base"
+                          aria-label="Become a landlord"
                         >
                           <Building2 className="h-4 w-4 sm:h-5 sm:w-5" />
                           <span className="flex-1 font-medium">Become a Landlord</span>
@@ -1168,6 +1240,7 @@ export function Header() {
                             setMobileMenuOpen(false);
                           }}
                           className="flex items-center space-x-3 p-3 rounded-xl w-full text-left text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/50 transition-all duration-200 text-sm sm:text-base"
+                          aria-label={isLandlordPending ? 'Verification pending' : 'Complete verification'}
                         >
                           <Shield className="h-4 w-4 sm:h-5 sm:w-5" />
                           <span className="flex-1 font-medium">
@@ -1184,6 +1257,7 @@ export function Header() {
                           setMobileMenuOpen(false);
                         }}
                         className="flex items-center space-x-3 p-3 rounded-xl w-full text-left text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/50 transition-all duration-200 text-sm sm:text-base"
+                        aria-label="Log out"
                       >
                         <LogOut className="h-4 w-4 sm:h-5 sm:w-5" />
                         <span className="flex-1 font-medium">Log out</span>
@@ -1199,7 +1273,7 @@ export function Header() {
 
       {/* Upgrade Dialog */}
       <AlertDialog open={showUpgradeDialog} onOpenChange={setShowUpgradeDialog}>
-        <AlertDialogContent className="max-w-[95vw] sm:max-w-lg">
+        <AlertDialogContent className="max-w-[95vw] sm:max-w-lg" role="dialog" aria-label="Upgrade to landlord account">
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center space-x-2 text-lg sm:text-xl">
               <Building2 className="h-5 w-5 sm:h-6 sm:w-6 text-purple-600 dark:text-purple-400" />
@@ -1242,7 +1316,7 @@ export function Header() {
 
       {/* Verification Dialog */}
       <Dialog open={showVerificationDialog} onOpenChange={setShowVerificationDialog}>
-        <DialogContent className="max-w-[95vw] sm:max-w-md">
+        <DialogContent className="max-w-[95vw] sm:max-w-md" role="dialog" aria-label="Landlord verification">
           <DialogHeader>
             <DialogTitle className="flex items-center space-x-2 text-lg sm:text-xl">
               <Shield className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
@@ -1295,6 +1369,7 @@ export function Header() {
                           accept="image/*,.pdf"
                           className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
                           onChange={(e) => handleFileChange(e, 'idDocument')}
+                          aria-label="Upload Government ID"
                         />
                         <Button variant="outline" size="sm" type="button" className="text-xs sm:text-sm h-7 sm:h-8">
                           {verificationDocs.idDocument ? 'Change' : 'Upload'}
@@ -1320,6 +1395,7 @@ export function Header() {
                           accept="image/*,.pdf"
                           className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
                           onChange={(e) => handleFileChange(e, 'proofOfAddress')}
+                          aria-label="Upload Proof of Address"
                         />
                         <Button variant="outline" size="sm" type="button" className="text-xs sm:text-sm h-7 sm:h-8">
                           {verificationDocs.proofOfAddress ? 'Change' : 'Upload'}
@@ -1345,6 +1421,7 @@ export function Header() {
                           accept="image/*,.pdf"
                           className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
                           onChange={(e) => handleFileChange(e, 'businessLicense')}
+                          aria-label="Upload Business License"
                         />
                         <Button variant="outline" size="sm" type="button" className="text-xs sm:text-sm h-7 sm:h-8">
                           {verificationDocs.businessLicense ? 'Change' : 'Upload'}

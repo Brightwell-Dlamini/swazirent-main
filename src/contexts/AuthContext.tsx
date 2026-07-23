@@ -1,7 +1,7 @@
 // src/contexts/AuthContext.tsx
 'use client';
 
-import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { User, AuthError, Session } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
@@ -22,6 +22,16 @@ export const getDefaultRedirect = (userType: UserType | null): string => {
   }
 };
 
+// Extended User type with proper metadata typing
+export interface ExtendedUser extends User {
+  user_metadata: {
+    user_type?: UserType;
+    full_name?: string;
+    phone?: string;
+    avatar_url?: string;
+  };
+}
+
 interface UserProfile {
   userType: UserType;
   isVerified: boolean;
@@ -30,7 +40,7 @@ interface UserProfile {
 }
 
 interface AuthContextType {
-  user: User | null;
+  user: ExtendedUser | null;
   userType: UserType | null;
   isVerified: boolean;
   isLoading: boolean;
@@ -74,7 +84,7 @@ interface ProfileCache {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<ExtendedUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -87,7 +97,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const lastUserCheckRef = useRef<number>(0);
   const sessionCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const isInitializedRef = useRef(false);
-  const userRef = useRef<User | null>(null);
+  const userRef = useRef<ExtendedUser | null>(null);
   const profileRef = useRef<UserProfile | null>(null);
 
   const userType = profile?.userType || null;
@@ -95,7 +105,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // === CACHE HELPERS ===
 
-  const getCachedUser = useCallback((): User | null => {
+  const getCachedUser = useCallback((): ExtendedUser | null => {
     try {
       const cached = localStorage.getItem(AUTH_CACHE_KEY);
       if (!cached) return null;
@@ -117,7 +127,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           app_metadata: {},
           aud: '',
           created_at: '',
-        } as User;
+        } as ExtendedUser;
       }
       return null;
     } catch {
@@ -144,7 +154,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const cacheUser = useCallback((userData: User | null) => {
+  const cacheUser = useCallback((userData: ExtendedUser | null) => {
     try {
       if (userData) {
         const cacheData: AuthCache = {
@@ -336,9 +346,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (currentUser) {
         // Only update if user changed
         if (!userRef.current || userRef.current.id !== currentUser.id) {
-          setUser(currentUser);
-          userRef.current = currentUser;
-          cacheUser(currentUser);
+          setUser(currentUser as ExtendedUser);
+          userRef.current = currentUser as ExtendedUser;
+          cacheUser(currentUser as ExtendedUser);
           
           const userProfile = await fetchUserProfile(currentUser.id, true);
           if (isMountedRef.current) {
@@ -389,9 +399,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           toast.success('Welcome back!');
 
           // Set user immediately
-          setUser(data.user);
-          userRef.current = data.user;
-          cacheUser(data.user);
+          setUser(data.user as ExtendedUser);
+          userRef.current = data.user as ExtendedUser;
+          cacheUser(data.user as ExtendedUser);
 
           // Fetch profile
           let userProfile = await fetchUserProfile(data.user.id, true);
@@ -488,9 +498,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             cacheProfile(profile);
           }
           
-          setUser(data.user);
-          userRef.current = data.user;
-          cacheUser(data.user);
+          setUser(data.user as ExtendedUser);
+          userRef.current = data.user as ExtendedUser;
+          cacheUser(data.user as ExtendedUser);
 
           if (!data.session) {
             toast.success('Account created! Please check your email to verify your account.');
@@ -530,6 +540,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       toast.error('Failed to sign out');
     }
   }, [router, cacheUser, cacheProfile]);
+
+  // === OPTIMIZED SESSION CHECK - Only on user interaction ===
+  const checkSessionOnUserInteraction = useCallback(async () => {
+    // Only check when user is active and document is visible
+    if (document.visibilityState === 'visible') {
+      const now = Date.now();
+      // Only check if 5 minutes have passed since last check
+      if (now - lastUserCheckRef.current < 5 * 60 * 1000) {
+        return;
+      }
+      lastUserCheckRef.current = now;
+      await refreshUser();
+    }
+  }, [refreshUser]);
 
   // === INITIALIZATION - ONLY RUNS ONCE ===
 
@@ -576,9 +600,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           
           if (needUpdate) {
             console.log('🔄 Session changed - updating from Supabase');
-            setUser(currentUser);
-            userRef.current = currentUser;
-            cacheUser(currentUser);
+            setUser(currentUser as ExtendedUser);
+            userRef.current = currentUser as ExtendedUser;
+            cacheUser(currentUser as ExtendedUser);
             
             const userProfile = await fetchUserProfile(currentUser.id, true);
             if (isMountedRef.current) {
@@ -620,52 +644,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     initializeAuth();
 
-    // === SET UP SESSION CHECK - REDUCED FREQUENCY ===
-    // Check every 5 minutes instead of 30
-    const checkSession = async () => {
-      const now = Date.now();
-      // Only check every 5 minutes
-      if (now - lastUserCheckRef.current < 5 * 60 * 1000) {
-        return;
-      }
-      lastUserCheckRef.current = now;
-
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const currentUser = session?.user ?? null;
-        
-        if (currentUser && userRef.current) {
-          if (currentUser.id !== userRef.current.id) {
-            setUser(currentUser);
-            userRef.current = currentUser;
-            cacheUser(currentUser);
-            
-            const userProfile = await fetchUserProfile(currentUser.id, true);
-            if (isMountedRef.current) {
-              if (JSON.stringify(profileRef.current) !== JSON.stringify(userProfile)) {
-                setProfile(userProfile);
-                profileRef.current = userProfile;
-                if (userProfile) {
-                  cacheProfile(userProfile);
-                }
-              }
-            }
-          }
-        } else if (!currentUser && userRef.current) {
-          setUser(null);
-          userRef.current = null;
-          setProfile(null);
-          profileRef.current = null;
-          cacheUser(null);
-          cacheProfile(null);
-        }
-      } catch (error) {
-        console.error('Session check error:', error);
-      }
+    // === OPTIMIZED: Check session on user interaction instead of interval ===
+    // Listen for visibility change (user returns to tab)
+    document.addEventListener('visibilitychange', checkSessionOnUserInteraction);
+    
+    // Listen for user activity (click, scroll, keypress)
+    const handleUserActivity = () => {
+      checkSessionOnUserInteraction();
     };
+    
+    document.addEventListener('click', handleUserActivity);
+    document.addEventListener('scroll', handleUserActivity);
+    document.addEventListener('keypress', handleUserActivity);
 
-    // Check session every 5 minutes (reduced from 30)
-    sessionCheckIntervalRef.current = setInterval(checkSession, 5 * 60 * 1000);
+    // Also check on reconnect
+    window.addEventListener('online', checkSessionOnUserInteraction);
 
     // Listen for auth state changes (only on actual auth events, not tab switches)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -675,9 +668,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const currentUser = session?.user ?? null;
           
           if (currentUser) {
-            setUser(currentUser);
-            userRef.current = currentUser;
-            cacheUser(currentUser);
+            setUser(currentUser as ExtendedUser);
+            userRef.current = currentUser as ExtendedUser;
+            cacheUser(currentUser as ExtendedUser);
             
             const userProfile = await fetchUserProfile(currentUser.id, true);
             if (isMountedRef.current) {
@@ -701,16 +694,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     );
 
+    // Clean up
     return () => {
       if (sessionCheckIntervalRef.current) {
         clearInterval(sessionCheckIntervalRef.current);
       }
       subscription.unsubscribe();
+      document.removeEventListener('visibilitychange', checkSessionOnUserInteraction);
+      document.removeEventListener('click', handleUserActivity);
+      document.removeEventListener('scroll', handleUserActivity);
+      document.removeEventListener('keypress', handleUserActivity);
+      window.removeEventListener('online', checkSessionOnUserInteraction);
       isMountedRef.current = false;
     };
   }, []); // Empty dependency array - ONLY RUNS ONCE
 
-  const value = {
+  // Memoize the value to prevent unnecessary re-renders
+  const value = useMemo(() => ({
     user,
     userType,
     isVerified,
@@ -723,7 +723,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     refreshUser,
     refreshUserType,
     redirectToDashboard,
-  };
+  }), [user, userType, isVerified, isLoading, isInitialized, profile, signIn, signUp, signOut, refreshUser, refreshUserType, redirectToDashboard]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

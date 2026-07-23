@@ -1,7 +1,7 @@
 // src/contexts/ThemeContext.tsx
 'use client';
 
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState, useMemo } from 'react';
 
 type Theme = 'light' | 'dark';
 
@@ -15,12 +15,14 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false);
-  const [theme, setTheme] = useState<Theme>('dark'); // ← Changed default to 'dark'
+  const [theme, setTheme] = useState<Theme>('dark');
 
   // Read theme from localStorage only after mounting
   useEffect(() => {
     setMounted(true);
     
+    // Use a more efficient method to get theme
+    const root = document.documentElement;
     const savedTheme = localStorage.getItem('theme') as Theme | null;
     const systemPrefersDark = window.matchMedia(
       '(prefers-color-scheme: dark)',
@@ -29,6 +31,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     // Priority: saved theme > system preference > dark (default)
     const initialTheme = savedTheme || (systemPrefersDark ? 'dark' : 'dark');
     setTheme(initialTheme);
+    
+    // Apply theme immediately to prevent flash
+    if (initialTheme === 'dark') {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
   }, []);
 
   // Apply theme class to document when theme changes
@@ -49,6 +58,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
   };
 
+  // Memoize the value to prevent unnecessary re-renders
+  const value = useMemo(() => ({
+    theme,
+    toggleTheme,
+    mounted,
+  }), [theme, mounted]);
+
   // Prevent hydration mismatch by returning children without theme context initially
   if (!mounted) {
     return (
@@ -59,7 +75,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme, mounted: true }}>
+    <ThemeContext.Provider value={value}>
       {children}
     </ThemeContext.Provider>
   );

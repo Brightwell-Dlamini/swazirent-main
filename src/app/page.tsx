@@ -1,7 +1,7 @@
 // src/app/page.tsx
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
@@ -29,52 +29,66 @@ import {
 import { supabase } from '@/lib/supabase';
 import { Property } from '@/types/property';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
+import { formatPrice } from '@/lib/utils';
 
 // City metadata with reliable images from Unsplash
 const CITIES = [
   { 
     name: 'Manzini', 
     image: 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?w=600&auto=format&fit=crop&q=80',
-    description: 'Commercial hub'
+    description: 'Commercial hub',
+    color: '4F46E5'
   },
   { 
     name: 'Mbabane', 
     image: 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=600&auto=format&fit=crop&q=80',
-    description: 'Capital city'
+    description: 'Capital city',
+    color: '7C3AED'
   },
   { 
     name: 'Matsapha', 
     image: 'https://images.unsplash.com/photo-1500382017468-9049fed747ef?w=600&auto=format&fit=crop&q=80',
-    description: 'Industrial area'
+    description: 'Industrial area',
+    color: '059669'
   },
   { 
     name: 'Nhlangano', 
     image: 'https://images.unsplash.com/photo-1448630360428-65456885c650?w=600&auto=format&fit=crop&q=80',
-    description: 'Southern region'
+    description: 'Southern region',
+    color: 'D97706'
   },
   { 
     name: 'Siteki', 
     image: 'https://images.unsplash.com/photo-1500382017468-9049fed747ef?w=600&auto=format&fit=crop&q=80',
-    description: 'Eastern region'
+    description: 'Eastern region',
+    color: 'DC2626'
   },
   { 
     name: 'Big Bend', 
     image: 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=600&auto=format&fit=crop&q=80',
-    description: 'Lubombo region'
+    description: 'Lubombo region',
+    color: '2563EB'
   },
   { 
     name: 'Pigg\'s Peak', 
     image: 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?w=600&auto=format&fit=crop&q=80',
-    description: 'Northern highlands'
+    description: 'Northern highlands',
+    color: '8B5CF6'
   },
   { 
     name: 'Mhlume', 
     image: 'https://images.unsplash.com/photo-1448630360428-65456885c650?w=600&auto=format&fit=crop&q=80',
-    description: 'Sugar estate'
+    description: 'Sugar estate',
+    color: '0D9488'
   },
 ];
 
 const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?w=600&auto=format&fit=crop&q=80';
+
+// Helper function to generate blur placeholder
+const generateBlurDataURL = (color: string = '4F46E5'): string => {
+  return `data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40"%3E%3Crect width="40" height="40" fill="%23${color}"/%3E%3C/svg%3E`;
+};
 
 // Floating particles for hero background
 const FloatingParticles = () => {
@@ -169,6 +183,15 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const heroRef = useRef<HTMLDivElement>(null);
 
+  // Memoize city data for performance
+  const cityMap = useMemo(() => {
+    const map = new Map();
+    CITIES.forEach(city => {
+      map.set(city.name.toLowerCase(), city);
+    });
+    return map;
+  }, []);
+
   useEffect(() => {
     async function fetchData() {
       try {
@@ -245,19 +268,25 @@ export default function HomePage() {
     }
   };
 
-  const getCityImage = (cityName: string) => {
-    const city = CITIES.find(c => c.name.toLowerCase() === cityName.toLowerCase());
+  const getCityData = useCallback((cityName: string) => {
+    const city = cityMap.get(cityName.toLowerCase());
+    return city || null;
+  }, [cityMap]);
+
+  const getCityImage = useCallback((cityName: string) => {
+    const city = getCityData(cityName);
     return city?.image || FALLBACK_IMAGE;
-  };
+  }, [getCityData]);
 
-  const getCityDescription = (cityName: string) => {
-    const city = CITIES.find(c => c.name.toLowerCase() === cityName.toLowerCase());
+  const getCityDescription = useCallback((cityName: string) => {
+    const city = getCityData(cityName);
     return city?.description || '';
-  };
+  }, [getCityData]);
 
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat('en-US').format(price);
-  };
+  const getCityColor = useCallback((cityName: string) => {
+    const city = getCityData(cityName);
+    return city?.color || '4F46E5';
+  }, [getCityData]);
 
   return (
     <main className="min-h-screen bg-white dark:bg-gray-950 transition-colors duration-300">
@@ -338,8 +367,6 @@ export default function HomePage() {
 
         <div className="container mx-auto px-4 relative z-10">
           <div className="max-w-5xl mx-auto">
-           
-
             {/* Main heading */}
             <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl xl:text-7xl font-bold text-center leading-[1.1] tracking-tight">
               <span className="text-gray-900 dark:text-white transition-colors duration-300">Find Your</span>
@@ -422,13 +449,8 @@ export default function HomePage() {
                 </div>
               </div>
             </div>
-
-            
-            
           </div>
         </div>
-
-       
       </section>
 
       {/* ========== CITY TILES SECTION ========== */}
@@ -445,32 +467,39 @@ export default function HomePage() {
               </Button>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
-              {cityStats.slice(0, 8).map((city) => (
-                <Link
-                  key={city.name}
-                  href={`/search?city=${encodeURIComponent(city.name.toLowerCase())}`}
-                  className="group relative overflow-hidden rounded-xl md:rounded-2xl aspect-square block shadow-lg hover:shadow-2xl transition-shadow duration-500"
-                >
-                  <Image
-                    src={getCityImage(city.name)}
-                    alt={city.name}
-                    fill
-                    className="object-cover group-hover:scale-110 transition-transform duration-700 ease-out"
-                    sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
-                    loading="lazy"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent group-hover:from-black/90 transition-all duration-500" />
-                  <div className="absolute bottom-0 left-0 right-0 p-3 md:p-5 text-white transform group-hover:translate-y-[-4px] transition-transform duration-500">
-                    <h3 className="font-semibold text-sm md:text-lg">{city.name}</h3>
-                    <p className="text-xs md:text-sm opacity-80">{city.count} properties</p>
-                    {getCityDescription(city.name) && (
-                      <p className="text-[10px] md:text-xs opacity-60 mt-0.5 md:mt-1 hidden sm:block">
-                        {getCityDescription(city.name)}
-                      </p>
-                    )}
-                  </div>
-                </Link>
-              ))}
+              {cityStats.slice(0, 8).map((city) => {
+                const cityColor = getCityColor(city.name);
+                const blurDataURL = generateBlurDataURL(cityColor);
+                
+                return (
+                  <Link
+                    key={city.name}
+                    href={`/search?city=${encodeURIComponent(city.name.toLowerCase())}`}
+                    className="group relative overflow-hidden rounded-xl md:rounded-2xl aspect-square block shadow-lg hover:shadow-2xl transition-shadow duration-500"
+                  >
+                    <Image
+                      src={getCityImage(city.name)}
+                      alt={city.name}
+                      fill
+                      className="object-cover group-hover:scale-110 transition-transform duration-700 ease-out"
+                      placeholder="blur"
+                      blurDataURL={blurDataURL}
+                      sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                      loading="lazy"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent group-hover:from-black/90 transition-all duration-500" />
+                    <div className="absolute bottom-0 left-0 right-0 p-3 md:p-5 text-white transform group-hover:translate-y-[-4px] transition-transform duration-500">
+                      <h3 className="font-semibold text-sm md:text-lg">{city.name}</h3>
+                      <p className="text-xs md:text-sm opacity-80">{city.count} properties</p>
+                      {getCityDescription(city.name) && (
+                        <p className="text-[10px] md:text-xs opacity-60 mt-0.5 md:mt-1 hidden sm:block">
+                          {getCityDescription(city.name)}
+                        </p>
+                      )}
+                    </div>
+                  </Link>
+                );
+              })}
             </div>
           </div>
         </section>
@@ -568,6 +597,8 @@ export default function HomePage() {
                           alt={property.title}
                           fill
                           className="object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
+                          placeholder="blur"
+                          blurDataURL={generateBlurDataURL('4F46E5')}
                           sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
                           loading="lazy"
                           onError={(e) => {
@@ -600,7 +631,7 @@ export default function HomePage() {
                         </div>
                         <div className="flex justify-between items-center">
                           <span className="text-base md:text-xl font-bold text-indigo-600 dark:text-indigo-400 transition-colors duration-300">
-                            E{formatPrice(property.price)}/month
+                            {formatPrice(property.price)}/month
                           </span>
                           <span className="text-xs md:text-sm text-gray-500 dark:text-gray-500 transition-colors duration-300">
                             {property.bedrooms || 0} bed • {property.bathrooms || 0} bath
