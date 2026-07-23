@@ -28,6 +28,7 @@ import {
   Bell,
   Heart,
   Settings,
+  Loader2,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useVerification } from '@/hooks/useVerification';
@@ -70,7 +71,6 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { Loader2 } from 'lucide-react';
 import {
   Popover,
   PopoverContent,
@@ -286,12 +286,15 @@ export function Header() {
     }
   };
 
+  // ✅ FIXED: Handle submit verification - call with correct arguments
   const handleSubmitVerification = async () => {
     if (!verificationDocs.idDocument) {
       toast.error('Please upload an ID document');
       return;
     }
 
+    // ✅ Use the submitVerification function from the hook
+    // The hook handles the actual upload and submission
     const success = await submitVerification({
       idDocument: verificationDocs.idDocument,
       proofOfAddress: verificationDocs.proofOfAddress || undefined,
@@ -305,6 +308,9 @@ export function Header() {
         proofOfAddress: null,
         businessLicense: null,
       });
+      toast.success('Verification documents submitted successfully!');
+    } else {
+      toast.error('Failed to submit verification. Please try again.');
     }
   };
 
@@ -691,7 +697,7 @@ export function Header() {
                             key={notification.id}
                             notification={notification}
                             onMarkAsRead={handleNotificationClick}
-                            onClose={() => {}} // Close popover handled by parent
+                            onClose={() => {}}
                           />
                         ))}
                       </div>
