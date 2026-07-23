@@ -25,6 +25,8 @@ import {
   BarChart,
   Camera,
   AlertCircle,
+  Clock,
+  FileText,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useLandlordProperties } from '@/hooks/useLandlordProperties';
@@ -32,6 +34,23 @@ import { useLandlordProperties } from '@/hooks/useLandlordProperties';
 interface PropertyWithPhotos extends Property {
   photos: PropertyPhoto[];
 }
+
+// Status transition rules
+const STATUS_TRANSITIONS: Record<string, string[]> = {
+  'draft': ['pending'],
+  'pending': ['active', 'rejected'],
+  'active': ['rented', 'pending'],
+  'rented': ['active'],
+  'rejected': ['pending'],
+};
+
+const STATUS_CONFIG: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; className?: string }> = {
+  'draft': { label: '📄 Draft', variant: 'outline', className: 'border-dashed' },
+  'pending': { label: '⏳ Pending Review', variant: 'secondary' },
+  'active': { label: '✓ Active', variant: 'default', className: 'bg-green-600' },
+  'rented': { label: '🏠 Rented', variant: 'outline' },
+  'rejected': { label: '✗ Rejected', variant: 'destructive' },
+};
 
 export default function LandlordPropertyManagePage() {
   const { user, isLoading: authLoading } = useAuth();
@@ -45,6 +64,7 @@ export default function LandlordPropertyManagePage() {
   const [activeTab, setActiveTab] = useState('overview');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -132,12 +152,29 @@ export default function LandlordPropertyManagePage() {
     };
   }, [user, propertyId]);
 
-  const handleStatusChange = async (newStatus: 'active' | 'rented') => {
+  const handleStatusChange = async (newStatus: 'active' | 'rented' | 'pending' | 'rejected') => {
     if (!property) return;
-    
-    const success = await updateStatus(property.id, newStatus);
-    if (success) {
-      setProperty({ ...property, status: newStatus });
+
+    // Validate status transition
+    const allowedTransitions = STATUS_TRANSITIONS[property.status] || [];
+    if (!allowedTransitions.includes(newStatus)) {
+      toast.error(`Cannot change status from "${property.status}" to "${newStatus}"`);
+      return;
+    }
+
+    setIsUpdatingStatus(true);
+
+    try {
+      const success = await updateStatus(property.id, newStatus);
+      if (success) {
+        setProperty({ ...property, status: newStatus });
+        toast.success(`Property status updated to ${STATUS_CONFIG[newStatus].label}`);
+      }
+    } catch (error) {
+      console.error('Status update error:', error);
+      toast.error('Failed to update status');
+    } finally {
+      setIsUpdatingStatus(false);
     }
   };
 
@@ -152,6 +189,77 @@ export default function LandlordPropertyManagePage() {
       setDeleteDialogOpen(false);
       router.push('/dashboard/landlord');
     }
+  };
+
+  // Get available actions based on current status
+  const getAvailableActions = () => {
+    if (!property) return [];
+
+    const actions = [];
+    const allowedTransitions = STATUS_TRANSITIONS[property.status] || [];
+
+    if (allowedTransitions.includes('pending')) {
+      actions.push({
+        label: 'Submit for Review',
+        icon: CheckCircle,
+        action: () => handleStatusChange('pending'),
+        variant: 'outline' as const,
+        className: 'text-green-600 border-green-600 hover:bg-green-50',
+      });
+    }
+
+    if (allowedTransitions.includes('active')) {
+      actions.push({
+        label: 'Publish Listing',
+        icon: CheckCircle,
+        action: () => handleStatusChange('active'),
+        variant: 'default' as const,
+        className: 'bg-green-600 hover:bg-green-700',
+      });
+    }
+
+    if (allowedTransitions.includes('rented')) {
+      actions.push({
+        label: 'Mark as Rented',
+        icon: CheckCircle,
+        action: () => handleStatusChange('rented'),
+        variant: 'outline' as const,
+        className: 'text-blue-600 border-blue-600 hover:bg-blue-50',
+      });
+    }
+
+    if (allowedTransitions.includes('active') && property.status === 'rented') {
+      actions.push({
+        label: 'Mark as Available',
+        icon: XCircle,
+        action: () => handleStatusChange('active'),
+        variant: 'outline' as const,
+        className: 'text-amber-600 border-amber-600 hover:bg-amber-50',
+      });
+    }
+
+    if (allowedTransitions.includes('rejected')) {
+      actions.push({
+        label: 'Reject',
+        icon: XCircle,
+        action: () => handleStatusChange('rejected'),
+        variant: 'outline' as const,
+        className: 'text-red-600 border-red-600 hover:bg-red-50',
+      });
+    }
+
+    // If status is rejected, allow resubmit
+    if (property.status === 'rejected' && allowedTransitions.includes('pending')) {
+      actions.push({
+        label: 'Resubmit for Review',
+        icon: AlertCircle,
+        action: () => handleStatusChange('pending'),
+        variant: 'outline' as const,
+        className: 'text-orange-600 border-orange-600 hover:bg-orange-50',
+      });
+    }
+
+    return actions;
   };
 
   // Loading state
@@ -190,6 +298,9 @@ export default function LandlordPropertyManagePage() {
     );
   }
 
+  const statusConfig = STATUS_CONFIG[property.status] || STATUS_CONFIG['draft'];
+  const availableActions = getAvailableActions();
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -210,19 +321,21 @@ export default function LandlordPropertyManagePage() {
                 </div>
               </div>
               <Badge
-                variant={property.status === 'active' ? 'default' : 'outline'}
-                className={property.status === 'active' ? 'bg-green-600' : ''}
+                variant={statusConfig.variant}
+                className={statusConfig.className}
               >
-                {property.status}
+                {statusConfig.label}
               </Badge>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" asChild>
-                <Link href={`/properties/${property.id}`} target="_blank">
-                  <Eye className="mr-2 h-4 w-4" />
-                  Public View
-                </Link>
-              </Button>
+              {property.status !== 'draft' && property.status !== 'rejected' && (
+                <Button variant="outline" size="sm" asChild>
+                  <Link href={`/properties/${property.id}`} target="_blank">
+                    <Eye className="mr-2 h-4 w-4" />
+                    Public View
+                  </Link>
+                </Button>
+              )}
               <Button size="sm" asChild>
                 <Link href={`/dashboard/landlord/edit-property/${property.id}`}>
                   <Edit className="mr-2 h-4 w-4" />
@@ -236,7 +349,7 @@ export default function LandlordPropertyManagePage() {
 
       <div className="container mx-auto px-4 py-8">
         {/* Quick Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -272,6 +385,20 @@ export default function LandlordPropertyManagePage() {
                     E{property.price.toLocaleString()}
                   </p>
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">Status</p>
+                  <p className="text-2xl font-bold capitalize">
+                    {property.status}
+                  </p>
+                </div>
+                <FileText className="h-8 w-8 text-gray-500 opacity-50" />
               </div>
             </CardContent>
           </Card>
@@ -382,6 +509,60 @@ export default function LandlordPropertyManagePage() {
                   </CardContent>
                 </Card>
 
+                {/* Status Management Card */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Status Management</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="mb-4">
+                      <p className="text-sm text-gray-500">Current Status</p>
+                      <Badge
+                        variant={statusConfig.variant}
+                        className={`text-base ${statusConfig.className}`}
+                      >
+                        {statusConfig.label}
+                      </Badge>
+                    </div>
+
+                    {availableActions.length > 0 && (
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        {availableActions.map((action, index) => (
+                          <Button
+                            key={index}
+                            variant={action.variant}
+                            className={`flex-col h-auto py-4 ${action.className || ''}`}
+                            onClick={action.action}
+                            disabled={isUpdatingStatus}
+                          >
+                            {isUpdatingStatus ? (
+                              <Loader2 className="h-5 w-5 mb-2 animate-spin" />
+                            ) : (
+                              <action.icon className="h-5 w-5 mb-2" />
+                            )}
+                            {action.label}
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+
+                    {property.status === 'pending' && (
+                      <p className="text-sm text-amber-600 mt-4 flex items-center gap-2">
+                        <Clock className="h-4 w-4" />
+                        Your property is being reviewed. You will be notified once approved.
+                      </p>
+                    )}
+
+                    {property.status === 'rejected' && (
+                      <p className="text-sm text-red-600 mt-4 flex items-center gap-2">
+                        <AlertCircle className="h-4 w-4" />
+                        Your property was rejected. Please review and resubmit.
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Quick Actions */}
                 <Card>
                   <CardHeader>
                     <CardTitle>Quick Actions</CardTitle>
@@ -410,27 +591,6 @@ export default function LandlordPropertyManagePage() {
                       </Button>
                       <Button
                         variant="outline"
-                        className="flex-col h-auto py-4"
-                        onClick={() =>
-                          handleStatusChange(
-                            property.status === 'active' ? 'rented' : 'active'
-                          )
-                        }
-                      >
-                        {property.status === 'active' ? (
-                          <>
-                            <CheckCircle className="h-5 w-5 mb-2 text-green-600" />
-                            Mark as Rented
-                          </>
-                        ) : (
-                          <>
-                            <XCircle className="h-5 w-5 mb-2 text-yellow-600" />
-                            Mark as Available
-                          </>
-                        )}
-                      </Button>
-                      <Button
-                        variant="outline"
                         className="flex-col h-auto py-4 text-red-600 hover:text-red-700"
                         onClick={() => setDeleteDialogOpen(true)}
                       >
@@ -450,21 +610,34 @@ export default function LandlordPropertyManagePage() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-4">
-                      <div>
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-gray-500">Views this week</span>
-                          <span className="font-semibold">+0%</span>
-                        </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2">
-                          <div
-                            className="bg-primary h-2 rounded-full"
-                            style={{ width: '0%' }}
-                          ></div>
-                        </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-gray-500">Views</span>
+                        <span className="font-semibold">{property.views || 0}</span>
                       </div>
-                      <p className="text-xs text-gray-500 mt-2">
-                        Analytics will update as views come in.
-                      </p>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-gray-500">Status</span>
+                        <Badge variant="outline">{property.status}</Badge>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-gray-500">Listed</span>
+                        <span className="text-sm">
+                          {new Date(property.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                      {property.status === 'active' && (
+                        <div className="mt-4 p-3 bg-green-50 rounded-lg">
+                          <p className="text-sm text-green-700">
+                            ✓ This property is live and visible to renters
+                          </p>
+                        </div>
+                      )}
+                      {property.status === 'draft' && (
+                        <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+                          <p className="text-sm text-gray-600">
+                            📄 This is a draft. Submit for review to make it live.
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -479,7 +652,7 @@ export default function LandlordPropertyManagePage() {
                 <CardTitle>Property Photos</CardTitle>
                 <Button size="sm" asChild>
                   <Link
-                    href={`/dashboard/landlord/edit-property/${property.id}/photos`}
+                    href={`/dashboard/landlord/edit-property/${property.id}`}
                   >
                     <Camera className="mr-2 h-4 w-4" />
                     Manage Photos
@@ -522,7 +695,7 @@ export default function LandlordPropertyManagePage() {
                     </p>
                     <Button asChild>
                       <Link
-                        href={`/dashboard/landlord/edit-property/${property.id}/photos`}
+                        href={`/dashboard/landlord/edit-property/${property.id}`}
                       >
                         <Camera className="mr-2 h-4 w-4" />
                         Upload Photos

@@ -1,13 +1,11 @@
 // src/app/dashboard/landlord/add-property/page.tsx
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
 import { useVerification } from '@/hooks/useVerification';
-import { usePriceInsight } from '@/hooks/usePriceInsight';
-import { useMediaUpload } from '@/hooks/useMediaUpload';
 import { supabase } from '@/lib/supabase';
 import { PropertyType } from '@/types/property';
 import {
@@ -39,12 +37,15 @@ import {
   Loader2,
   Upload,
   X,
-  TrendingUp,
-  TrendingDown,
-  Minus,
+  Save,
+  Eye,
+  AlertCircle,
+  Clock,
+  Shield,
 } from 'lucide-react';
 import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 
 export default function AddPropertyPage() {
   const { user, userType, isLoading: authLoading } = useAuth();
@@ -52,12 +53,15 @@ export default function AddPropertyPage() {
   const router = useRouter();
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
+  
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  const { files: photos, previews: photoPreviews, addFiles: addPhotos, removeFile: removePhoto, count: photoCount } = useMediaUpload({
-    maxFiles: 15,
-  });
+  const [photos, setPhotos] = useState<File[]>([]);
+  const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
 
   const [formData, setFormData] = useState({
     title: '',
@@ -77,14 +81,6 @@ export default function AddPropertyPage() {
   });
 
   const totalSteps = 4;
-
-  // Price insight hook
-  const { priceInsight, checkingPrice, applySuggestedPrice } = usePriceInsight({
-    price: formData.price,
-    city: formData.city,
-    propertyType: formData.property_type,
-    bedrooms: formData.bedrooms,
-  });
 
   // Check auth and permissions
   useEffect(() => {
@@ -135,145 +131,74 @@ export default function AddPropertyPage() {
     }));
   }, []);
 
+  const handlePhotoUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (photos.length + files.length > 15) {
+      toast.error('Maximum 15 photos allowed');
+      return;
+    }
+
+    const newPreviews = files.map(file => URL.createObjectURL(file));
+    setPhotos(prev => [...prev, ...files]);
+    setPhotoPreviews(prev => [...prev, ...newPreviews]);
+  }, [photos.length]);
+
+  const removePhoto = useCallback((index: number) => {
+    setPhotos(prev => prev.filter((_, i) => i !== index));
+    URL.revokeObjectURL(photoPreviews[index]);
+    setPhotoPreviews(prev => prev.filter((_, i) => i !== index));
+  }, [photoPreviews]);
+
   const handlePhoneChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
-    const normalized = normalizeEswatiniPhone(value);
-    setFormData((prev) => ({ ...prev, contact_phone: normalized }));
+    const cleaned = value.replace(/[^\d+]/g, '');
+    setFormData((prev) => ({ ...prev, contact_phone: cleaned }));
   }, []);
 
-  const validateForm = useCallback((): boolean => {
-    if (!formData.title.trim()) {
-      setError('Please enter a listing title');
-      return false;
-    }
-    if (!formData.description.trim()) {
-      setError('Please enter a description');
-      return false;
-    }
-    if (!formData.property_type) {
-      setError('Please select a property type');
-      return false;
-    }
+  const validateForm = useCallback((): { valid: boolean; errors: string[] } => {
+    const errors: string[] = [];
+    
+    if (!formData.title.trim()) errors.push('Please enter a listing title');
+    if (!formData.description.trim()) errors.push('Please enter a description');
+    if (!formData.property_type) errors.push('Please select a property type');
+    
     const price = parseFloat(formData.price);
     if (!formData.price || isNaN(price) || price <= 0) {
-      setError('Please enter a valid price greater than 0');
-      return false;
+      errors.push('Please enter a valid price greater than 0');
     }
-    if (!formData.city) {
-      setError('Please select a city in Eswatini');
-      return false;
-    }
-    if (!formData.suburb.trim()) {
-      setError('Please enter a suburb');
-      return false;
-    }
+    
+    if (!formData.city) errors.push('Please select a city in Eswatini');
+    if (!formData.suburb.trim()) errors.push('Please enter a suburb');
+    
     if (!formData.contact_phone.trim()) {
-      setError('Please enter a contact phone number');
-      return false;
+      errors.push('Please enter a contact phone number');
+    } else if (!isValidEswatiniPhone(formData.contact_phone)) {
+      errors.push('Please enter a valid Eswatini phone number (e.g., +268 7600 0000)');
     }
-    if (!isValidEswatiniPhone(formData.contact_phone)) {
-      setError('Please enter a valid Eswatini phone number (e.g., +268 7600 0000)');
-      return false;
-    }
-    return true;
+    
+    return { valid: errors.length === 0, errors };
   }, [formData]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
+  const uploadPhotos = async (propertyId: string): Promise<string[]> => {
+    if (photos.length === 0) return [];
 
-    if (!validateForm()) {
-      return;
-    }
+    const uploadedUrls: string[] = [];
+    const total = photos.length;
 
-    if (!isLandlordVerified) {
-      setError('Your landlord account must be verified before you can list properties in Eswatini.');
-      return;
-    }
+    for (let i = 0; i < photos.length; i++) {
+      const photo = photos[i];
+      const fileExt = photo.name.split('.').pop() || 'jpg';
+      const fileName = `${user!.id}/${propertyId}/${Date.now()}-${i}.${fileExt}`;
 
-    if (!user) {
-      setError('You must be logged in to list a property');
-      return;
-    }
+      setUploadProgress({ current: i + 1, total });
 
-    setLoading(true);
-    let uploadedPhotoUrls: string[] = [];
+      const { error: uploadError } = await supabase.storage
+        .from('property-photos')
+        .upload(fileName, photo);
 
-    try {
-      // 1. Upload photos
-      const photoUrls: string[] = [];
-
-      if (photos.length > 0) {
-        for (let i = 0; i < photos.length; i++) {
-          const photo = photos[i];
-          const fileExt = photo.name.split('.').pop() || 'jpg';
-          const fileName = `${user.id}/${Date.now()}-${i}.${fileExt}`;
-
-          const { error: uploadError } = await supabase.storage
-            .from('property-photos')
-            .upload(fileName, photo);
-
-          if (uploadError) {
-            // Clean up any uploaded photos
-            if (uploadedPhotoUrls.length > 0) {
-              const paths = uploadedPhotoUrls.map(url => {
-                const parts = url.split('/');
-                const publicIndex = parts.indexOf('public');
-                if (publicIndex !== -1) {
-                  return parts.slice(publicIndex + 1).join('/');
-                }
-                return null;
-              }).filter((path): path is string => path !== null);
-              
-              if (paths.length > 0) {
-                await supabase.storage.from('property-photos').remove(paths);
-              }
-            }
-            throw new Error(`Failed to upload photo ${i + 1}: ${uploadError.message}`);
-          }
-
-          const { data: { publicUrl } } = supabase.storage
-            .from('property-photos')
-            .getPublicUrl(fileName);
-
-          photoUrls.push(publicUrl);
-          uploadedPhotoUrls = [...photoUrls];
-        }
-      }
-
-      // 2. Create property
-      const propertyData = {
-        landlord_id: user.id,
-        title: formData.title.trim(),
-        description: formData.description.trim(),
-        property_type: formData.property_type as PropertyType,
-        price: parseFloat(formData.price),
-        location_city: formData.city,
-        location_suburb: formData.suburb.trim(),
-        location_address: formData.address.trim() || null,
-        bedrooms: formData.bedrooms !== '0' ? parseInt(formData.bedrooms) : null,
-        bathrooms: formData.bathrooms !== '0' ? parseFloat(formData.bathrooms) : null,
-        is_furnished: formData.is_furnished,
-        amenities: formData.amenities,
-        lease_terms: formData.lease_terms.trim() || null,
-        contact_whatsapp: formData.contact_whatsapp.trim() || null,
-        contact_phone: normalizeEswatiniPhone(formData.contact_phone.trim()),
-        status: 'pending',
-        views: 0,
-        is_featured: false,
-        country: 'Eswatini',
-      };
-
-      const { data: property, error: propertyError } = await supabase
-        .from('properties')
-        .insert([propertyData])
-        .select()
-        .single();
-
-      if (propertyError) {
-        // Clean up photos
-        if (uploadedPhotoUrls.length > 0) {
-          const paths = uploadedPhotoUrls.map(url => {
+      if (uploadError) {
+        if (uploadedUrls.length > 0) {
+          const paths = uploadedUrls.map(url => {
             const parts = url.split('/');
             const publicIndex = parts.indexOf('public');
             if (publicIndex !== -1) {
@@ -286,47 +211,146 @@ export default function AddPropertyPage() {
             await supabase.storage.from('property-photos').remove(paths);
           }
         }
-        throw new Error(`Failed to create property: ${propertyError.message}`);
+        throw new Error(`Failed to upload photo ${i + 1}: ${uploadError.message}`);
       }
 
-      if (!property) {
-        throw new Error('Property was created but no data was returned');
+      const { data: { publicUrl } } = supabase.storage
+        .from('property-photos')
+        .getPublicUrl(fileName);
+
+      uploadedUrls.push(publicUrl);
+    }
+
+    setUploadProgress(null);
+    return uploadedUrls;
+  };
+
+  const saveProperty = async (status: 'pending' | 'draft') => {
+    setError(null);
+
+    if (status === 'pending') {
+      const { valid, errors } = validateForm();
+      if (!valid) {
+        setError(errors.join('. '));
+        return false;
       }
 
-      // 3. Add photos to property_photos table
-      if (photoUrls.length > 0) {
-        const photoRecords = photoUrls.map((url, index) => ({
-          property_id: property.id,
-          photo_url: url,
-          display_order: index,
-          caption: null,
-        }));
+      if (!isLandlordVerified) {
+        setError('Your landlord account must be verified before you can publish properties.');
+        return false;
+      }
+    }
 
-        const { error: photosError } = await supabase
-          .from('property_photos')
-          .insert(photoRecords);
+    if (!user) {
+      setError('You must be logged in to list a property');
+      return false;
+    }
 
-        if (photosError) {
-          // Non-critical failure - property created but photos failed
-          toast.warning('Property created but failed to save photo records. You can add photos later.');
+    try {
+      // ✅ FIXED: Removed 'country' column - it doesn't exist in the database
+      const propertyData = {
+        landlord_id: user.id,
+        title: formData.title.trim() || 'Untitled Property',
+        description: formData.description.trim() || 'No description provided',
+        property_type: formData.property_type || 'apartment',
+        price: parseFloat(formData.price) || 0,
+        location_city: formData.city || 'Unknown',
+        location_suburb: formData.suburb.trim() || 'Unknown',
+        location_address: formData.address.trim() || null,
+        bedrooms: formData.bedrooms !== '0' ? parseInt(formData.bedrooms) : null,
+        bathrooms: formData.bathrooms !== '0' ? parseFloat(formData.bathrooms) : null,
+        is_furnished: formData.is_furnished,
+        amenities: formData.amenities,
+        lease_terms: formData.lease_terms.trim() || null,
+        contact_whatsapp: formData.contact_whatsapp.trim() || null,
+        contact_phone: formData.contact_phone ? normalizeEswatiniPhone(formData.contact_phone.trim()) : '',
+        status: status,
+        views: 0,
+        is_featured: false,
+        // country: 'Eswatini', // ❌ REMOVED - column doesn't exist
+      };
+
+      const { data: property, error: propertyError } = await supabase
+        .from('properties')
+        .insert([propertyData])
+        .select()
+        .single();
+
+      if (propertyError) throw new Error(`Failed to create property: ${propertyError.message}`);
+
+      if (!property) throw new Error('Property was created but no data was returned');
+
+      if (photos.length > 0) {
+        try {
+          const photoUrls = await uploadPhotos(property.id);
+          
+          if (photoUrls.length > 0) {
+            const photoRecords = photoUrls.map((url, index) => ({
+              property_id: property.id,
+              photo_url: url,
+              display_order: index,
+              caption: null,
+            }));
+
+            const { error: photosError } = await supabase
+              .from('property_photos')
+              .insert(photoRecords);
+
+            if (photosError) {
+              console.warn('Failed to save photo records:', photosError);
+              toast.warning('Property created but some photos failed to save');
+            }
+          }
+        } catch (photoError) {
+          console.warn('Photo upload error:', photoError);
+          toast.warning('Property created but photos failed to upload. You can add photos later.');
         }
       }
 
-      toast.success('Property submitted for review!');
-      router.push('/dashboard/landlord');
+      return property.id;
     } catch (error: unknown) {
-      console.error('Submission error:', error);
+      console.error('Save error:', error);
       if (error instanceof Error) {
         setError(error.message);
-        toast.error(error.message);
       } else {
         setError('An unknown error occurred');
-        toast.error('An unknown error occurred');
       }
-    } finally {
-      setLoading(false);
+      return false;
     }
   };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    
+    const propertyId = await saveProperty('pending');
+    
+    if (propertyId) {
+      toast.success('Property submitted for review!');
+      router.push('/dashboard/landlord');
+    }
+    
+    setLoading(false);
+  };
+
+  const handleSaveDraft = async () => {
+    setSavingDraft(true);
+    
+    const propertyId = await saveProperty('draft');
+    
+    if (propertyId) {
+      toast.success('Draft saved successfully');
+      router.push('/dashboard/landlord');
+    }
+    
+    setSavingDraft(false);
+  };
+
+  useEffect(() => {
+    return () => {
+      photoPreviews.forEach(preview => URL.revokeObjectURL(preview));
+    };
+  }, [photoPreviews]);
 
   const renderStep = () => {
     switch (currentStep) {
@@ -392,80 +416,6 @@ export default function AddPropertyPage() {
                   required
                 />
               </div>
-
-              {checkingPrice && (
-                <div className="mt-2 flex items-center text-sm text-gray-500">
-                  <Loader2 className="h-3 w-3 animate-spin mr-2" />
-                  Analyzing Eswatini market prices...
-                </div>
-              )}
-
-              {priceInsight && !checkingPrice && priceInsight.count > 0 && (
-                <div
-                  className={`mt-3 p-3 rounded-lg border ${
-                    priceInsight.suggestion === 'good'
-                      ? 'bg-green-50 border-green-200'
-                      : priceInsight.suggestion === 'high'
-                        ? 'bg-yellow-50 border-yellow-200'
-                        : priceInsight.suggestion === 'low'
-                          ? 'bg-blue-50 border-blue-200'
-                          : 'bg-gray-50 border-gray-200'
-                  }`}
-                >
-                  <div className="flex items-start gap-2">
-                    {priceInsight.suggestion === 'good' && (
-                      <Minus className="h-5 w-5 text-green-600 mt-0.5" />
-                    )}
-                    {priceInsight.suggestion === 'high' && (
-                      <TrendingUp className="h-5 w-5 text-yellow-600 mt-0.5" />
-                    )}
-                    {priceInsight.suggestion === 'low' && (
-                      <TrendingDown className="h-5 w-5 text-blue-600 mt-0.5" />
-                    )}
-                    <div className="flex-1">
-                      <p className="text-sm font-medium">
-                        Based on {priceInsight.count} similar properties in{' '}
-                        {formData.city}, Eswatini
-                      </p>
-                      <p className="text-sm mt-1">{priceInsight.message}</p>
-                      <div className="flex items-center gap-4 mt-2 text-xs text-gray-600">
-                        <span>
-                          Range: E{priceInsight.min.toLocaleString()} - E
-                          {priceInsight.max.toLocaleString()}
-                        </span>
-                        <span>
-                          Avg: E
-                          {Math.round(priceInsight.average).toLocaleString()}
-                        </span>
-                      </div>
-
-                      {priceInsight.suggestion !== 'good' && (
-                        <Button
-                          type="button"
-                          variant="link"
-                          size="sm"
-                          className="mt-2 h-auto p-0 text-primary"
-                          onClick={() => {
-                            const suggested = applySuggestedPrice();
-                            if (suggested) {
-                              setFormData(prev => ({ ...prev, price: suggested.toString() }));
-                              toast.success('Suggested price applied');
-                            }
-                          }}
-                        >
-                          Apply suggested price
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {priceInsight && priceInsight.count === 0 && (
-                <p className="mt-2 text-sm text-gray-500">
-                  No similar properties found in {formData.city}, Eswatini to compare pricing.
-                </p>
-              )}
 
               <div>
                 <Label htmlFor="description">Description *</Label>
@@ -671,7 +621,7 @@ export default function AddPropertyPage() {
                     </div>
                   ))}
 
-                  {photoCount < 15 && (
+                  {photos.length < 15 && (
                     <label className="aspect-square border-2 border-dashed rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-primary transition-colors">
                       <Upload className="h-6 w-6 text-gray-400 mb-1" />
                       <span className="text-xs text-gray-500">Upload</span>
@@ -680,17 +630,27 @@ export default function AddPropertyPage() {
                         accept="image/*"
                         multiple
                         className="hidden"
-                        onChange={(e) => addPhotos(e.target.files || [])}
+                        onChange={handlePhotoUpload}
                       />
                     </label>
                   )}
                 </div>
                 <p className="text-sm text-gray-500">
                   Upload clear photos of the property. First photo will be the cover.
-                  {photoCount > 0 && ` (${photoCount}/15)`}
+                  {photos.length > 0 && ` (${photos.length}/15)`}
                 </p>
               </div>
             </div>
+
+            {uploadProgress && (
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span>Uploading photos...</span>
+                  <span>{uploadProgress.current} / {uploadProgress.total}</span>
+                </div>
+                <Progress value={(uploadProgress.current / uploadProgress.total) * 100} />
+              </div>
+            )}
 
             <div className="space-y-4">
               <h3 className="font-medium">Contact Information</h3>
@@ -720,7 +680,7 @@ export default function AddPropertyPage() {
                   onChange={(e) =>
                     setFormData((prev) => ({
                       ...prev,
-                      contact_whatsapp: normalizeEswatiniPhone(e.target.value),
+                      contact_whatsapp: e.target.value.replace(/[^\d+]/g, ''),
                     }))
                   }
                 />
@@ -738,13 +698,7 @@ export default function AddPropertyPage() {
                   <div className="flex">
                     <dt className="w-24 text-sm text-gray-500">Price:</dt>
                     <dd className="text-sm font-semibold">
-                      E{parseFloat(formData.price || '0').toLocaleString()}
-                      /month
-                      {priceInsight?.suggestion === 'good' && (
-                        <span className="ml-2 text-xs text-green-600">
-                          ✓ Good price
-                        </span>
-                      )}
+                      E{parseFloat(formData.price || '0').toLocaleString()}/month
                     </dd>
                   </div>
                   <div className="flex">
@@ -773,7 +727,7 @@ export default function AddPropertyPage() {
                   </div>
                   <div className="flex">
                     <dt className="w-24 text-sm text-gray-500">Photos:</dt>
-                    <dd className="text-sm">{photoCount} uploaded</dd>
+                    <dd className="text-sm">{photos.length} uploaded</dd>
                   </div>
                 </dl>
               </CardContent>
@@ -806,7 +760,7 @@ export default function AddPropertyPage() {
     return null;
   }
 
-  // Pending verification
+  // Pending verification - but still allow drafts
   if (isLandlordPending) {
     return (
       <div className="container mx-auto px-4 py-8 max-w-3xl">
@@ -820,27 +774,96 @@ export default function AddPropertyPage() {
           <h1 className="text-3xl font-bold">Add New Property</h1>
           <p className="text-gray-600">List your property on Ekhaya</p>
         </div>
-        <Card>
-          <CardContent className="p-12 text-center">
-            <div className="flex justify-center mb-4">
-              <div className="h-16 w-16 rounded-full bg-yellow-100 flex items-center justify-center">
-                <Loader2 className="h-8 w-8 text-yellow-600 animate-spin" />
+        <Card className="border-amber-200 bg-amber-50 mb-6">
+          <CardContent className="p-6">
+            <div className="flex items-start gap-4">
+              <Clock className="h-8 w-8 text-amber-600 flex-shrink-0 mt-1" />
+              <div>
+                <h3 className="font-semibold text-amber-800">Verification Pending</h3>
+                <p className="text-amber-700 text-sm">
+                  Your account is being verified. You can still create a draft property now.
+                  Once verified, you can submit it for review.
+                </p>
+                <div className="mt-3">
+                  <Button onClick={refreshVerification} variant="outline" size="sm">
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Check Status
+                  </Button>
+                </div>
               </div>
             </div>
-            <h2 className="text-2xl font-bold mb-2">Verification Pending</h2>
-            <p className="text-gray-600 mb-4">
-              Your landlord account is being verified. You will be able to list properties in Eswatini once approved.
-            </p>
-            <Button asChild>
-              <Link href="/dashboard/landlord">Go to Dashboard</Link>
-            </Button>
           </CardContent>
         </Card>
+
+        <form onSubmit={handleSubmit}>
+          {error && (
+            <Alert variant="destructive" className="mb-6">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          <Card>
+            <CardContent className="p-6">{renderStep()}</CardContent>
+          </Card>
+
+          <div className="flex justify-between mt-6">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handlePrevious}
+              disabled={currentStep === 1}
+            >
+              <ChevronLeft className="h-4 w-4 mr-2" />
+              Previous
+            </Button>
+
+            <div className="flex gap-2">
+              {currentStep === totalSteps && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleSaveDraft}
+                  disabled={savingDraft}
+                >
+                  {savingDraft ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="mr-2 h-4 w-4" />
+                      Save as Draft
+                    </>
+                  )}
+                </Button>
+              )}
+
+              {currentStep < totalSteps ? (
+                <Button type="button" onClick={handleNext}>
+                  Next
+                  <ChevronRight className="h-4 w-4 ml-2" />
+                </Button>
+              ) : (
+                <Button type="submit" disabled={loading}>
+                  {loading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Submitting...
+                    </>
+                  ) : (
+                    'Submit for Review'
+                  )}
+                </Button>
+              )}
+            </div>
+          </div>
+        </form>
       </div>
     );
   }
 
-  // Unverified landlord
+  // Unverified landlord - allow drafts
   if (!isLandlordVerified) {
     return (
       <div className="container mx-auto px-4 py-8 max-w-3xl">
@@ -854,26 +877,92 @@ export default function AddPropertyPage() {
           <h1 className="text-3xl font-bold">Add New Property</h1>
           <p className="text-gray-600">List your property on Ekhaya</p>
         </div>
-        <Card>
-          <CardContent className="p-12 text-center">
-            <div className="flex justify-center mb-4">
-              <div className="h-16 w-16 rounded-full bg-red-100 flex items-center justify-center">
-                <X className="h-8 w-8 text-red-600" />
+        <Card className="border-red-200 bg-red-50 mb-6">
+          <CardContent className="p-6">
+            <div className="flex items-start gap-4">
+              <AlertCircle className="h-8 w-8 text-red-600 flex-shrink-0 mt-1" />
+              <div>
+                <h3 className="font-semibold text-red-800">Verification Required</h3>
+                <p className="text-red-700 text-sm">
+                  Your landlord account must be verified before you can submit properties.
+                  You can save a draft now and submit it later.
+                </p>
+                <div className="mt-3">
+                  <Button asChild>
+                    <Link href="/dashboard/landlord/verify">
+                      <Shield className="mr-2 h-4 w-4" />
+                      Start Verification
+                    </Link>
+                  </Button>
+                </div>
               </div>
             </div>
-            <h2 className="text-2xl font-bold mb-2">Verification Required</h2>
-            <p className="text-gray-600 mb-4">
-              Your landlord account must be verified before you can list properties in Eswatini.
-            </p>
-            <Button asChild>
-              <Link href="/dashboard/landlord/verify">Start Verification</Link>
-            </Button>
           </CardContent>
         </Card>
+
+        <form onSubmit={handleSubmit}>
+          {error && (
+            <Alert variant="destructive" className="mb-6">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          <Card>
+            <CardContent className="p-6">{renderStep()}</CardContent>
+          </Card>
+
+          <div className="flex justify-between mt-6">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handlePrevious}
+              disabled={currentStep === 1}
+            >
+              <ChevronLeft className="h-4 w-4 mr-2" />
+              Previous
+            </Button>
+
+            <div className="flex gap-2">
+              {currentStep === totalSteps && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleSaveDraft}
+                  disabled={savingDraft}
+                >
+                  {savingDraft ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="mr-2 h-4 w-4" />
+                      Save as Draft
+                    </>
+                  )}
+                </Button>
+              )}
+
+              {currentStep < totalSteps ? (
+                <Button type="button" onClick={handleNext}>
+                  Next
+                  <ChevronRight className="h-4 w-4 ml-2" />
+                </Button>
+              ) : (
+                <Button type="button" variant="secondary" disabled>
+                  <Eye className="mr-2 h-4 w-4" />
+                  Verify to Submit
+                </Button>
+              )}
+            </div>
+          </div>
+        </form>
       </div>
     );
   }
 
+  // Verified - full functionality
   return (
     <div className="container mx-auto px-4 py-8 max-w-3xl">
       <div className="mb-8">
@@ -944,23 +1033,46 @@ export default function AddPropertyPage() {
             Previous
           </Button>
 
-          {currentStep < totalSteps ? (
-            <Button type="button" onClick={handleNext}>
-              Next
-              <ChevronRight className="h-4 w-4 ml-2" />
-            </Button>
-          ) : (
-            <Button type="submit" disabled={loading}>
-              {loading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Submitting...
-                </>
-              ) : (
-                'Submit for Review'
-              )}
-            </Button>
-          )}
+          <div className="flex gap-2">
+            {currentStep === totalSteps && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleSaveDraft}
+                disabled={savingDraft}
+              >
+                {savingDraft ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="mr-2 h-4 w-4" />
+                    Save Draft
+                  </>
+                )}
+              </Button>
+            )}
+
+            {currentStep < totalSteps ? (
+              <Button type="button" onClick={handleNext}>
+                Next
+                <ChevronRight className="h-4 w-4 ml-2" />
+              </Button>
+            ) : (
+              <Button type="submit" disabled={loading}>
+                {loading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Submitting...
+                  </>
+                ) : (
+                  'Submit for Review'
+                )}
+              </Button>
+            )}
+          </div>
         </div>
       </form>
     </div>

@@ -8,7 +8,6 @@ import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { PropertyType, Property } from '@/types/property';
-import { usePriceInsight } from '@/hooks/usePriceInsight';
 import { useMediaUpload } from '@/hooks/useMediaUpload';
 import {
   ESWATINI_CITIES,
@@ -38,9 +37,6 @@ import {
   Loader2,
   Upload,
   X,
-  TrendingUp,
-  TrendingDown,
-  Minus,
   Trash2,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -79,6 +75,7 @@ export default function EditPropertyPage() {
   const [property, setProperty] = useState<Property | null>(null);
   const [existingPhotos, setExistingPhotos] = useState<any[]>([]);
   const [photosToDelete, setPhotosToDelete] = useState<string[]>([]);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   
   const { files: newPhotos, previews: newPhotoPreviews, addFiles: addNewPhotos, removeFile: removeNewPhoto } = useMediaUpload({
     maxFiles: 15,
@@ -101,14 +98,43 @@ export default function EditPropertyPage() {
     contact_phone: '',
   });
 
-  // Price insight
-  const { priceInsight, checkingPrice, applySuggestedPrice } = usePriceInsight({
-    price: formData.price,
-    city: formData.city,
-    propertyType: formData.property_type,
-    bedrooms: formData.bedrooms,
-    excludePropertyId: propertyId,
-  });
+  // Track changes for unsaved warning
+  useEffect(() => {
+    if (property) {
+      const hasChanges = 
+        formData.title !== property.title ||
+        formData.description !== property.description ||
+        formData.property_type !== property.property_type ||
+        formData.price !== property.price?.toString() ||
+        formData.city !== property.location_city ||
+        formData.suburb !== property.location_suburb ||
+        formData.address !== (property.location_address || '') ||
+        formData.bedrooms !== property.bedrooms?.toString() ||
+        formData.bathrooms !== property.bathrooms?.toString() ||
+        formData.is_furnished !== property.is_furnished ||
+        JSON.stringify(formData.amenities) !== JSON.stringify(property.amenities || []) ||
+        formData.lease_terms !== (property.lease_terms || '') ||
+        formData.contact_whatsapp !== (property.contact_whatsapp || '') ||
+        formData.contact_phone !== (property.contact_phone || '') ||
+        photosToDelete.length > 0 ||
+        newPhotos.length > 0;
+      
+      setHasUnsavedChanges(hasChanges);
+    }
+  }, [formData, property, photosToDelete, newPhotos]);
+
+  // Warn before leaving with unsaved changes
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
 
   // Fetch property data
   useEffect(() => {
@@ -196,15 +222,29 @@ export default function EditPropertyPage() {
     setPhotosToDelete(photosToDelete.filter((id) => id !== photoId));
   };
 
-  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhoneChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
-    setFormData(prev => ({ ...prev, contact_phone: normalizeEswatiniPhone(value) }));
-  };
+    setFormData(prev => ({ ...prev, contact_phone: value }));
+  }, []);
 
-  const handleWhatsAppChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhoneBlur = useCallback(() => {
+    if (formData.contact_phone) {
+      const normalized = normalizeEswatiniPhone(formData.contact_phone);
+      setFormData(prev => ({ ...prev, contact_phone: normalized }));
+    }
+  }, [formData.contact_phone]);
+
+  const handleWhatsAppChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
-    setFormData(prev => ({ ...prev, contact_whatsapp: normalizeEswatiniPhone(value) }));
-  };
+    setFormData(prev => ({ ...prev, contact_whatsapp: value }));
+  }, []);
+
+  const handleWhatsAppBlur = useCallback(() => {
+    if (formData.contact_whatsapp) {
+      const normalized = normalizeEswatiniPhone(formData.contact_whatsapp);
+      setFormData(prev => ({ ...prev, contact_whatsapp: normalized }));
+    }
+  }, [formData.contact_whatsapp]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -223,7 +263,9 @@ export default function EditPropertyPage() {
         return;
       }
 
-      if (!isValidEswatiniPhone(formData.contact_phone)) {
+      // Only validate phone on submit
+      const normalizedPhone = normalizeEswatiniPhone(formData.contact_phone);
+      if (!isValidEswatiniPhone(normalizedPhone)) {
         setError('Please enter a valid Eswatini phone number (e.g., +268 7600 0000)');
         setSaving(false);
         return;
@@ -242,14 +284,13 @@ export default function EditPropertyPage() {
       if (newPhotos.length > 0) {
         for (const photo of newPhotos) {
           const fileExt = photo.name.split('.').pop() || 'jpg';
-          const fileName = `${user?.id}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+          const fileName = `${user?.id}/${propertyId}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
 
           const { error: uploadError } = await supabase.storage
             .from('property-photos')
             .upload(fileName, photo);
 
           if (uploadError) {
-            // Clean up uploaded photos
             if (uploadedPhotoUrls.length > 0) {
               const paths = uploadedPhotoUrls.map(url => {
                 const parts = url.split('/');
@@ -277,6 +318,7 @@ export default function EditPropertyPage() {
       }
 
       // 2. Update property
+      // ✅ FIXED: Removed 'country' column - it doesn't exist in the database
       const { error: updateError } = await supabase
         .from('properties')
         .update({
@@ -293,14 +335,13 @@ export default function EditPropertyPage() {
           amenities: formData.amenities,
           lease_terms: formData.lease_terms.trim() || null,
           contact_whatsapp: formData.contact_whatsapp.trim() || null,
-          contact_phone: normalizeEswatiniPhone(formData.contact_phone.trim()),
+          contact_phone: normalizedPhone,
           updated_at: new Date().toISOString(),
-          country: 'Eswatini',
+          // country: 'Eswatini', // ❌ REMOVED - column doesn't exist
         })
         .eq('id', propertyId);
 
       if (updateError) {
-        // Rollback: Delete newly uploaded photos
         if (uploadedPhotoUrls.length > 0) {
           const paths = uploadedPhotoUrls.map(url => {
             const parts = url.split('/');
@@ -333,7 +374,6 @@ export default function EditPropertyPage() {
           .insert(photoRecords);
 
         if (photosError) {
-          // Rollback: Delete uploaded photos from storage
           if (uploadedPhotoUrls.length > 0) {
             const paths = uploadedPhotoUrls.map(url => {
               const parts = url.split('/');
@@ -357,13 +397,11 @@ export default function EditPropertyPage() {
         for (const photoId of photosToDelete) {
           const photo = existingPhotos.find(p => p.id === photoId);
           if (photo) {
-            // Delete from database
             await supabase
               .from('property_photos')
               .delete()
               .eq('id', photoId);
 
-            // Delete from storage
             const storagePath = extractStoragePath(photo.photo_url);
             if (storagePath) {
               await supabase.storage
@@ -375,6 +413,7 @@ export default function EditPropertyPage() {
       }
 
       toast.success('Property updated successfully!');
+      setHasUnsavedChanges(false);
       router.push(`/dashboard/landlord/properties/${propertyId}`);
     } catch (error: unknown) {
       console.error('Update error:', error);
@@ -434,6 +473,9 @@ export default function EditPropertyPage() {
         </Button>
         <h1 className="text-3xl font-bold">Edit Property</h1>
         <p className="text-gray-600">Update your property listing in Eswatini</p>
+        {hasUnsavedChanges && (
+          <p className="text-sm text-amber-600 mt-2">⚠️ You have unsaved changes</p>
+        )}
       </div>
 
       <form onSubmit={handleSubmit}>
@@ -501,80 +543,6 @@ export default function EditPropertyPage() {
                     required
                   />
                 </div>
-
-                {checkingPrice && (
-                  <div className="mt-2 flex items-center text-sm text-gray-500">
-                    <Loader2 className="h-3 w-3 animate-spin mr-2" />
-                    Analyzing Eswatini market prices...
-                  </div>
-                )}
-
-                {priceInsight && !checkingPrice && priceInsight.count > 0 && (
-                  <div
-                    className={`mt-3 p-3 rounded-lg border ${
-                      priceInsight.suggestion === 'good'
-                        ? 'bg-green-50 border-green-200'
-                        : priceInsight.suggestion === 'high'
-                          ? 'bg-yellow-50 border-yellow-200'
-                          : priceInsight.suggestion === 'low'
-                            ? 'bg-blue-50 border-blue-200'
-                            : 'bg-gray-50 border-gray-200'
-                    }`}
-                  >
-                    <div className="flex items-start gap-2">
-                      {priceInsight.suggestion === 'good' && (
-                        <Minus className="h-5 w-5 text-green-600 mt-0.5" />
-                      )}
-                      {priceInsight.suggestion === 'high' && (
-                        <TrendingUp className="h-5 w-5 text-yellow-600 mt-0.5" />
-                      )}
-                      {priceInsight.suggestion === 'low' && (
-                        <TrendingDown className="h-5 w-5 text-blue-600 mt-0.5" />
-                      )}
-                      <div className="flex-1">
-                        <p className="text-sm font-medium">
-                          Based on {priceInsight.count} similar properties in{' '}
-                          {formData.city}, Eswatini
-                        </p>
-                        <p className="text-sm mt-1">{priceInsight.message}</p>
-                        <div className="flex items-center gap-4 mt-2 text-xs text-gray-600">
-                          <span>
-                            Range: E{priceInsight.min.toLocaleString()} - E
-                            {priceInsight.max.toLocaleString()}
-                          </span>
-                          <span>
-                            Avg: E
-                            {Math.round(priceInsight.average).toLocaleString()}
-                          </span>
-                        </div>
-
-                        {priceInsight.suggestion !== 'good' && (
-                          <Button
-                            type="button"
-                            variant="link"
-                            size="sm"
-                            className="mt-2 h-auto p-0 text-primary"
-                            onClick={() => {
-                              const suggested = applySuggestedPrice();
-                              if (suggested) {
-                                setFormData(prev => ({ ...prev, price: suggested.toString() }));
-                                toast.success('Suggested price applied');
-                              }
-                            }}
-                          >
-                            Apply suggested price
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {priceInsight && priceInsight.count === 0 && (
-                  <p className="mt-2 text-sm text-gray-500">
-                    No similar properties found in {formData.city}, Eswatini to compare pricing.
-                  </p>
-                )}
 
                 <div>
                   <Label htmlFor="description">Description *</Label>
@@ -806,6 +774,11 @@ export default function EditPropertyPage() {
                               >
                                 <X className="h-3 w-3 text-white" />
                               </Button>
+                              <div className="absolute inset-0 bg-black/20 rounded-lg flex items-center justify-center">
+                                <span className="text-white text-xs font-medium bg-red-500 px-2 py-1 rounded">
+                                  Will delete
+                                </span>
+                              </div>
                             </div>
                           );
                         })}
@@ -879,6 +852,7 @@ export default function EditPropertyPage() {
                     placeholder="+268 7600 0000"
                     value={formData.contact_phone}
                     onChange={handlePhoneChange}
+                    onBlur={handlePhoneBlur}
                     required
                   />
                   {formData.contact_phone && (
@@ -896,6 +870,7 @@ export default function EditPropertyPage() {
                     placeholder="+268 7600 0000"
                     value={formData.contact_whatsapp}
                     onChange={handleWhatsAppChange}
+                    onBlur={handleWhatsAppBlur}
                   />
                 </div>
               </div>

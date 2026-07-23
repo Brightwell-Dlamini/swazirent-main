@@ -10,6 +10,7 @@ import { Footer } from '@/components/layout/Footer';
 import { BackToTop } from '@/components/ui/BackToTop';
 import { Toaster } from 'sonner';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { Providers } from './providers'; // Import the providers
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -29,24 +30,27 @@ export default function RootLayout({
       <body className={inter.className}>
         <ThemeProvider>
           <AuthProvider>
-            <ErrorBoundary>
-              <Header />
-              {children}
-              <Footer />
-              <BackToTop />
-              <Toaster 
-                position="top-right"
-                richColors
-                closeButton
-                toastOptions={{
-                  style: {
-                    background: 'var(--background)',
-                    color: 'var(--foreground)',
-                    border: '1px solid var(--border)',
-                  },
-                }}
-              />
-            </ErrorBoundary>
+            {/* Add Providers here - wraps everything that needs TanStack Query */}
+            <Providers>
+              <ErrorBoundary>
+                <Header />
+                {children}
+                <Footer />
+                <BackToTop />
+                <Toaster 
+                  position="top-right"
+                  richColors
+                  closeButton
+                  toastOptions={{
+                    style: {
+                      background: 'var(--background)',
+                      color: 'var(--foreground)',
+                      border: '1px solid var(--border)',
+                    },
+                  }}
+                />
+              </ErrorBoundary>
+            </Providers>
           </AuthProvider>
         </ThemeProvider>
       </body>
