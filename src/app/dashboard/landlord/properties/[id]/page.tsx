@@ -152,7 +152,7 @@ export default function LandlordPropertyManagePage() {
     };
   }, [user, propertyId]);
 
-  // ✅ FIXED: Handle status change directly with Supabase
+  // Handle status change directly with Supabase
   const handleStatusChange = async (newStatus: 'active' | 'rented' | 'pending' | 'rejected') => {
     if (!property) return;
 
@@ -166,7 +166,6 @@ export default function LandlordPropertyManagePage() {
     setIsUpdatingStatus(true);
 
     try {
-      // ✅ Direct Supabase update
       const { error } = await supabase
         .from('properties')
         .update({ 
@@ -310,6 +309,9 @@ export default function LandlordPropertyManagePage() {
   const statusConfig = STATUS_CONFIG[property.status] || STATUS_CONFIG['draft'];
   const availableActions = getAvailableActions();
 
+  // ✅ FIXED: Convert status to string for comparison
+  const statusString = String(property.status);
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -337,7 +339,8 @@ export default function LandlordPropertyManagePage() {
               </Badge>
             </div>
             <div className="flex gap-2">
-              {property.status !== 'draft' && property.status !== 'rejected' && (
+              {/* ✅ FIXED: Use string comparison */}
+              {statusString !== 'draft' && statusString !== 'rejected' && (
                 <Button variant="outline" size="sm" asChild>
                   <Link href={`/properties/${property.id}`} target="_blank">
                     <Eye className="mr-2 h-4 w-4" />
@@ -555,14 +558,14 @@ export default function LandlordPropertyManagePage() {
                       </div>
                     )}
 
-                    {property.status === 'pending' && (
+                    {statusString === 'pending' && (
                       <p className="text-sm text-amber-600 mt-4 flex items-center gap-2">
                         <Clock className="h-4 w-4" />
                         Your property is being reviewed. You will be notified once approved.
                       </p>
                     )}
 
-                    {property.status === 'rejected' && (
+                    {statusString === 'rejected' && (
                       <p className="text-sm text-red-600 mt-4 flex items-center gap-2">
                         <AlertCircle className="h-4 w-4" />
                         Your property was rejected. Please review and resubmit.
@@ -633,14 +636,14 @@ export default function LandlordPropertyManagePage() {
                           {new Date(property.created_at).toLocaleDateString()}
                         </span>
                       </div>
-                      {property.status === 'active' && (
+                      {statusString === 'active' && (
                         <div className="mt-4 p-3 bg-green-50 rounded-lg">
                           <p className="text-sm text-green-700">
                             ✓ This property is live and visible to renters
                           </p>
                         </div>
                       )}
-                      {property.status === 'draft' && (
+                      {statusString === 'draft' && (
                         <div className="mt-4 p-3 bg-gray-50 rounded-lg">
                           <p className="text-sm text-gray-600">
                             📄 This is a draft. Submit for review to make it live.
