@@ -84,7 +84,6 @@ export default function LandlordDashboard() {
   
   const verificationChecked = useRef(false);
 
-  // ✅ FIXED: Add initialPageParam
   const {
     data,
     fetchNextPage,
@@ -342,7 +341,7 @@ export default function LandlordDashboard() {
           </CardContent>
         </Card>
 
-        {/* Show existing properties */}
+        {/* ✅ FIXED: Use Table directly instead of PropertyTable */}
         {displayedProperties.length > 0 && (
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
@@ -352,12 +351,28 @@ export default function LandlordDashboard() {
               </div>
             </CardHeader>
             <CardContent>
-              <PropertyTable 
-                properties={displayedProperties}
-                onDelete={handleDeleteClick}
-                onStatusChange={handleStatusChange}
-                isPending={true}
-              />
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Property</TableHead>
+                    <TableHead>Price (E)</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Views</TableHead>
+                    <TableHead>Listed</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {displayedProperties.map((property) => (
+                    <PropertyRow
+                      key={property.id}
+                      property={property}
+                      onDelete={handleDeleteClick}
+                      onStatusChange={handleStatusChange}
+                    />
+                  ))}
+                </TableBody>
+              </Table>
             </CardContent>
           </Card>
         )}
