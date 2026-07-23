@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
-import { Property, PropertyPhoto } from '@/types/property';
 import { useVerification } from '@/hooks/useVerification';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -57,6 +56,7 @@ import { StatsSkeleton, PropertyTableSkeleton } from '@/components/landlord/Prop
 import { supabase } from '@/lib/supabase';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useInView } from 'react-intersection-observer';
+import { Property, PropertyPhoto } from '@/types/property';
 
 interface PropertyWithPhotos extends Property {
   photos: PropertyPhoto[];
@@ -84,7 +84,7 @@ export default function LandlordDashboard() {
   
   const verificationChecked = useRef(false);
 
-  // Fetch properties with infinite query
+  // ✅ FIXED: Add initialPageParam
   const {
     data,
     fetchNextPage,
@@ -128,9 +128,10 @@ export default function LandlordDashboard() {
 
       return { properties, nextCursor };
     },
+    initialPageParam: null as null | string,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
     enabled: !!user && userType === 'landlord',
-    staleTime: 1000 * 60 * 5, // 5 minutes
+    staleTime: 1000 * 60 * 5,
   });
 
   // Load more when scrolling
