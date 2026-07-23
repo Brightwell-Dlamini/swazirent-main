@@ -61,6 +61,8 @@ interface SavedSearch {
 type SortOption = 'newest' | 'price_asc' | 'price_desc' | 'popular';
 type ViewMode = 'grid' | 'list';
 
+const ITEMS_PER_PAGE = 12; // ← Moved to constant outside component
+
 // Eswatini cities
 const ESWATINI_CITIES = [
   'Mbabane', 'Manzini','Matsapha', 'Ezulwini', 'Lobamba', 'Nhlangano',
@@ -537,14 +539,14 @@ export default function SearchContent() {
 
   // MEMOIZED: Paginated properties
   const paginatedProperties = useMemo(() => {
-    const start = (page - 1) * itemsPerPage;
-    const end = start + itemsPerPage;
+    const start = (page - 1) * ITEMS_PER_PAGE; // ← Use constant
+    const end = start + ITEMS_PER_PAGE; // ← Use constant
     return filteredAndSortedProperties.slice(0, end);
   }, [filteredAndSortedProperties, page]);
 
   // MEMOIZED: Derived values
   const totalPages = useMemo(() => 
-    Math.ceil(filteredAndSortedProperties.length / itemsPerPage),
+    Math.ceil(filteredAndSortedProperties.length / ITEMS_PER_PAGE), // ← Use constant
     [filteredAndSortedProperties.length]
   );
 
@@ -932,8 +934,7 @@ export default function SearchContent() {
                 </Button>
               )}
             </div>
-            <FilterContent
-              filters={filters}
+            <FilterContent              filters={filters}
               onFilterChange={handleFilterChange}
               onClearFilters={clearFilters}
               hasActiveFilters={hasActiveFilters}
