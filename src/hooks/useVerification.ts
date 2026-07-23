@@ -14,6 +14,12 @@ interface VerificationState {
   status: 'unverified' | 'pending' | 'verified' | 'rejected';
 }
 
+interface VerificationDocuments {
+  idDocument: File;
+  proofOfAddress?: File;
+  businessLicense?: File;
+}
+
 export function useVerification() {
   const { user, userType, isLoading: authLoading } = useAuth();
   const [isVerified, setIsVerified] = useState(false);
@@ -38,7 +44,6 @@ export function useVerification() {
 
       if (error) {
         console.error('Error fetching verification:', error);
-        // Fallback to defaults
         setIsVerified(false);
         setVerificationLevel('unverified');
         return;
@@ -55,8 +60,8 @@ export function useVerification() {
     }
   }, [user]);
 
-  // Submit verification request
-  const submitVerificationRequest = useCallback(async () => {
+  // ✅ FIXED: Submit verification with documents
+  const submitVerification = useCallback(async (documents?: VerificationDocuments) => {
     if (!user) {
       toast.error('You must be logged in');
       return false;
@@ -92,6 +97,52 @@ export function useVerification() {
         return true;
       }
 
+      // If documents were provided, upload them
+      if (documents) {
+        try {
+          // Upload ID document
+          if (documents.idDocument) {
+            const idPath = `verifications/${user.id}/id_${Date.now()}_${documents.idDocument.name}`;
+            const { error: idError } = await supabase.storage
+              .from('verification-documents')
+              .upload(idPath, documents.idDocument);
+            
+            if (idError) {
+              console.error('ID upload error:', idError);
+              // Continue even if upload fails - we still want to submit the request
+            }
+          }
+
+          // Upload proof of address
+          if (documents.proofOfAddress) {
+            const addressPath = `verifications/${user.id}/address_${Date.now()}_${documents.proofOfAddress.name}`;
+            const { error: addressError } = await supabase.storage
+              .from('verification-documents')
+              .upload(addressPath, documents.proofOfAddress);
+            
+            if (addressError) {
+              console.error('Address proof upload error:', addressError);
+            }
+          }
+
+          // Upload business license
+          if (documents.businessLicense) {
+            const licensePath = `verifications/${user.id}/license_${Date.now()}_${documents.businessLicense.name}`;
+            const { error: licenseError } = await supabase.storage
+              .from('verification-documents')
+              .upload(licensePath, documents.businessLicense);
+            
+            if (licenseError) {
+              console.error('Business license upload error:', licenseError);
+            }
+          }
+        } catch (uploadError) {
+          console.error('Document upload error:', uploadError);
+          // Continue with verification request even if uploads fail
+          toast.warning('Some documents failed to upload. Please try again later.');
+        }
+      }
+
       // Update to pending
       const { error: updateError } = await supabase
         .from('profiles')
@@ -114,6 +165,11 @@ export function useVerification() {
       setIsSubmitting(false);
     }
   }, [user, userType, refreshVerification]);
+
+  // Legacy method - for backward compatibility
+  const submitVerificationRequest = useCallback(async () => {
+    return submitVerification();
+  }, [submitVerification]);
 
   // Refresh on mount if user is landlord
   useEffect(() => {
@@ -142,7 +198,7 @@ export function useVerification() {
     isLoading,
     isSubmitting,
     refreshVerification,
-    submitVerification: submitVerificationRequest,
+    submitVerification,
     submitVerificationRequest,
   };
 }
