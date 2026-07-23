@@ -152,6 +152,7 @@ export default function LandlordPropertyManagePage() {
     };
   }, [user, propertyId]);
 
+  // ✅ FIXED: Handle status change directly with Supabase
   const handleStatusChange = async (newStatus: 'active' | 'rented' | 'pending' | 'rejected') => {
     if (!property) return;
 
@@ -165,11 +166,19 @@ export default function LandlordPropertyManagePage() {
     setIsUpdatingStatus(true);
 
     try {
-      const success = await updateStatus(property.id, newStatus);
-      if (success) {
-        setProperty({ ...property, status: newStatus });
-        toast.success(`Property status updated to ${STATUS_CONFIG[newStatus].label}`);
-      }
+      // ✅ Direct Supabase update
+      const { error } = await supabase
+        .from('properties')
+        .update({ 
+          status: newStatus,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', property.id);
+
+      if (error) throw error;
+
+      setProperty({ ...property, status: newStatus });
+      toast.success(`Property status updated to ${STATUS_CONFIG[newStatus].label}`);
     } catch (error) {
       console.error('Status update error:', error);
       toast.error('Failed to update status');
