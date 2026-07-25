@@ -1,12 +1,13 @@
 // src/app/dashboard/landlord/page.tsx
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
 import { useVerification } from '@/hooks/useVerification';
+import { canPostListings } from '@/types/user';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -45,10 +46,8 @@ import {
   XCircle,
   Loader2,
   Clock,
-  AlertCircle,
   Building,
   Shield,
-  FileText,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -56,11 +55,7 @@ import { StatsSkeleton, PropertyTableSkeleton } from '@/components/landlord/Prop
 import { supabase } from '@/lib/supabase';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useInView } from 'react-intersection-observer';
-import { Property, PropertyPhoto } from '@/types/property';
-
-interface PropertyWithPhotos extends Property {
-  photos: PropertyPhoto[];
-}
+import { PropertyPhoto } from '@/types/property';
 
 const PAGE_SIZE = 10;
 
@@ -71,18 +66,19 @@ const getPrimaryPhoto = (photos?: PropertyPhoto[]) => {
 
 export default function LandlordDashboard() {
   const { user, userType, isLoading, isInitialized } = useAuth();
-  const { status, isLandlordVerified, isLandlordPending, isLandlordRejected, refreshVerification } = useVerification();
+  const { isLandlordVerified, isLandlordPending, refreshVerification } = useVerification();
   const router = useRouter();
   const queryClient = useQueryClient();
   const { ref, inView } = useInView();
-  
+
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [propertyToDelete, setPropertyToDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [showVerificationBanner, setShowVerificationBanner] = useState(true);
   const [optimisticUpdates, setOptimisticUpdates] = useState<Record<string, any>>({});
-  
+
   const verificationChecked = useRef(false);
+  const isPoster = canPostListings(userType);
 
   const {
     data,
@@ -95,10 +91,11 @@ export default function LandlordDashboard() {
     queryKey: ['landlord-properties', user?.id],
     queryFn: async ({ pageParam = null }) => {
       if (!user) return { properties: [], nextCursor: null };
-      
+
       let query = supabase
         .from('properties')
-        .select(`
+        .select(
+          `
           *,
           photos:property_photos(
             id,
@@ -108,7 +105,8 @@ export default function LandlordDashboard() {
             display_order,
             created_at
           )
-        `)
+        `
+        )
         .eq('landlord_id', user.id)
         .order('created_at', { ascending: false })
         .limit(PAGE_SIZE + 1);
@@ -118,7 +116,6 @@ export default function LandlordDashboard() {
       }
 
       const { data, error } = await query;
-
       if (error) throw error;
 
       const hasMore = data && data.length > PAGE_SIZE;
@@ -129,29 +126,25 @@ export default function LandlordDashboard() {
     },
     initialPageParam: null as null | string,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
-    enabled: !!user && userType === 'landlord',
+    enabled: !!user && isPoster,
     staleTime: 1000 * 60 * 5,
   });
 
-  // Load more when scrolling
   useEffect(() => {
     if (inView && hasNextPage && !isFetchingNextPage) {
       fetchNextPage();
     }
   }, [inView, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  // Check verification status - only once
   useEffect(() => {
-    if (!user || userType !== 'landlord') return;
+    if (!user || !isPoster) return;
     if (verificationChecked.current) return;
-    
     verificationChecked.current = true;
     if (isLandlordPending) {
       refreshVerification();
     }
-  }, [user, userType, isLandlordPending, refreshVerification]);
+  }, [user, isPoster, isLandlordPending, refreshVerification]);
 
-  // Redirect if not authenticated or not a landlord
   useEffect(() => {
     if (!isInitialized || isLoading) return;
 
@@ -159,39 +152,33 @@ export default function LandlordDashboard() {
       router.push('/auth/login');
       return;
     }
-    
-    if (userType === 'renter') {
+
+    // Seekers / renters → renter dashboard
+    if (userType === 'seeker' || userType === 'renter') {
       router.push('/dashboard/renter');
-      toast.info('This page is for landlords only', {
-        description: 'Redirecting to your renter dashboard.',
-      });
+      toast.info('This page is for property posters only');
       return;
     }
-    
+
     if (userType === 'admin') {
       router.push('/dashboard/admin');
-      toast.info('This page is for landlords only', {
-        description: 'Redirecting to your admin dashboard.',
-      });
       return;
     }
   }, [user, userType, isLoading, isInitialized, router]);
 
-  // Get all properties from paginated data
-  const allProperties = data?.pages.flatMap(page => page.properties) || [];
-  
-  // Apply optimistic updates
-  const displayedProperties = allProperties.map(prop => ({
+  const allProperties = data?.pages.flatMap((page) => page.properties) || [];
+  const displayedProperties = allProperties.map((prop) => ({
     ...prop,
-    ...(optimisticUpdates[prop.id] || {})
+    ...(optimisticUpdates[prop.id] || {}),
   }));
 
-  // Calculate stats from displayed properties
   const stats = {
     total: displayedProperties.length,
-    active: displayedProperties.filter(p => p.status === 'active').length,
-    rented: displayedProperties.filter(p => p.status === 'rented').length,
-    pending: displayedProperties.filter(p => p.status === 'pending' || p.status === 'draft').length,
+    active: displayedProperties.filter((p) => p.status === 'active').length,
+    rented: displayedProperties.filter((p) => p.status === 'rented').length,
+    pending: displayedProperties.filter(
+      (p) => p.status === 'pending' || p.status === 'draft'
+    ).length,
     totalViews: displayedProperties.reduce((sum, p) => sum + (p.views || 0), 0),
   };
 
@@ -202,28 +189,20 @@ export default function LandlordDashboard() {
 
   const handleDeleteProperty = async () => {
     if (!propertyToDelete) return;
-    
     setDeleting(true);
-    
     try {
-      // Optimistic update
       queryClient.setQueryData(['landlord-properties', user?.id], (old: any) => {
         if (!old) return old;
         return {
           ...old,
           pages: old.pages.map((page: any) => ({
             ...page,
-            properties: page.properties.filter((p: any) => p.id !== propertyToDelete)
-          }))
+            properties: page.properties.filter((p: any) => p.id !== propertyToDelete),
+          })),
         };
       });
 
-      // Delete from Supabase
-      const { error } = await supabase
-        .from('properties')
-        .delete()
-        .eq('id', propertyToDelete);
-
+      const { error } = await supabase.from('properties').delete().eq('id', propertyToDelete);
       if (error) throw error;
 
       toast.success('Property deleted successfully');
@@ -232,7 +211,6 @@ export default function LandlordDashboard() {
     } catch (error) {
       console.error('Delete error:', error);
       toast.error('Failed to delete property');
-      // Refetch to restore correct data
       refetch();
     } finally {
       setDeleting(false);
@@ -240,10 +218,9 @@ export default function LandlordDashboard() {
   };
 
   const handleStatusChange = async (propertyId: string, newStatus: string) => {
-    // Optimistic update
-    setOptimisticUpdates(prev => ({
+    setOptimisticUpdates((prev) => ({
       ...prev,
-      [propertyId]: { status: newStatus }
+      [propertyId]: { status: newStatus },
     }));
 
     try {
@@ -253,37 +230,30 @@ export default function LandlordDashboard() {
         .eq('id', propertyId);
 
       if (error) throw error;
-
       toast.success(`Property marked as ${newStatus}`);
-      
-      // Update optimistic update to permanent
-      setOptimisticUpdates(prev => {
-        const newUpdates = { ...prev };
-        delete newUpdates[propertyId];
-        return newUpdates;
+      setOptimisticUpdates((prev) => {
+        const next = { ...prev };
+        delete next[propertyId];
+        return next;
       });
-
-      // Refetch to ensure consistency
       refetch();
     } catch (error) {
       console.error('Status update error:', error);
       toast.error('Failed to update status');
-      // Revert optimistic update
-      setOptimisticUpdates(prev => {
-        const newUpdates = { ...prev };
-        delete newUpdates[propertyId];
-        return newUpdates;
+      setOptimisticUpdates((prev) => {
+        const next = { ...prev };
+        delete next[propertyId];
+        return next;
       });
     }
   };
 
-  // Loading state
-  if (!isInitialized || isLoading || propertiesLoading) {
+  if (!isInitialized || isLoading || (isPoster && propertiesLoading)) {
     return (
       <div className="container mx-auto px-4 py-8">
         <div className="flex justify-between items-center mb-8">
           <div>
-            <h1 className="text-3xl font-bold">Landlord Dashboard</h1>
+            <h1 className="text-3xl font-bold">My Listings</h1>
             <p className="text-gray-600">Manage your properties and track performance</p>
           </div>
           <Button disabled>
@@ -297,23 +267,32 @@ export default function LandlordDashboard() {
     );
   }
 
-  // Pending verification - but can still create drafts
-  if (userType === 'landlord' && isLandlordPending) {
+  // Not a poster role → empty (redirect effect handles navigation)
+  if (!isPoster) {
     return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex justify-between items-center mb-8">
-          <div>
-            <h1 className="text-3xl font-bold">Landlord Dashboard</h1>
-            <p className="text-gray-600">Manage your properties and track performance</p>
-          </div>
-          <Button asChild>
-            <Link href="/dashboard/landlord/add-property">
-              <Plus className="mr-2 h-4 w-4" />
-              Create Draft Property
-            </Link>
-          </Button>
+      <div className="container mx-auto px-4 py-16 text-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-4" />
+        <p className="text-muted-foreground">Redirecting…</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="container mx-auto px-4 py-8">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+        <div>
+          <h1 className="text-3xl font-bold">My Listings</h1>
+          <p className="text-gray-600">Manage your properties and track performance</p>
         </div>
-        
+        <Button asChild>
+          <Link href="/dashboard/landlord/add-property">
+            <Plus className="mr-2 h-4 w-4" />
+            Add New Property
+          </Link>
+        </Button>
+      </div>
+
+      {isLandlordPending && (
         <Card className="mb-6 border-amber-200 bg-amber-50">
           <CardContent className="p-6">
             <div className="flex items-start gap-4">
@@ -321,12 +300,10 @@ export default function LandlordDashboard() {
               <div>
                 <h3 className="font-semibold text-amber-800">Verification Pending</h3>
                 <p className="text-amber-700 text-sm">
-                  Your account is being verified. You can still create draft properties now, 
-                  but they won't be visible to renters until you're verified.
+                  You can create drafts now. Publish requires verification.
                 </p>
                 <div className="mt-3 flex gap-3">
                   <Button onClick={refreshVerification} variant="outline" size="sm">
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Check Status
                   </Button>
                   <Button asChild variant="outline" size="sm">
@@ -340,176 +317,70 @@ export default function LandlordDashboard() {
             </div>
           </CardContent>
         </Card>
+      )}
 
-        {/* ✅ FIXED: Use Table directly instead of PropertyTable */}
-        {displayedProperties.length > 0 && (
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>Your Properties</CardTitle>
-              <div className="flex items-center gap-2 text-sm text-gray-500">
-                <span>Showing {displayedProperties.length} properties</span>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Property</TableHead>
-                    <TableHead>Price (E)</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Views</TableHead>
-                    <TableHead>Listed</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {displayedProperties.map((property) => (
-                    <PropertyRow
-                      key={property.id}
-                      property={property}
-                      onDelete={handleDeleteClick}
-                      onStatusChange={handleStatusChange}
-                    />
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        )}
-      </div>
-    );
-  }
-
-  // Not a landlord
-  if (userType !== 'landlord') {
-    return null;
-  }
-
-  return (
-    <div className="container mx-auto px-4 py-8">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
-        <div>
-          <h1 className="text-3xl font-bold">Landlord Dashboard</h1>
-          <p className="text-gray-600">
-            Manage your properties and track performance
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button asChild>
-            <Link href="/dashboard/landlord/add-property">
-              <Plus className="mr-2 h-4 w-4" />
-              Add New Property
-            </Link>
-          </Button>
-        </div>
-      </div>
-
-      {/* Verification Banner */}
       {isLandlordVerified && showVerificationBanner && (
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -20 }}
           className="mb-6 bg-green-50 dark:bg-green-950/50 border border-green-200 dark:border-green-800 rounded-lg p-4 flex items-center justify-between"
         >
           <div className="flex items-center gap-3">
             <CheckCircle className="h-5 w-5 text-green-600" />
             <div>
-              <p className="font-medium text-green-800 dark:text-green-200">
-                ✓ Account Verified
-              </p>
+              <p className="font-medium text-green-800 dark:text-green-200">Account Verified</p>
               <p className="text-sm text-green-600 dark:text-green-300">
-                Your landlord account is verified. You can now list properties in Eswatini.
+                You can list properties on Ekhaya.
               </p>
             </div>
           </div>
           <button
             onClick={() => setShowVerificationBanner(false)}
             className="text-green-600 hover:text-green-800"
-            aria-label="Dismiss banner"
+            aria-label="Dismiss"
           >
             ×
           </button>
         </motion.div>
       )}
 
-      {/* Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
         <Card>
           <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Total Properties</p>
-                <p className="text-2xl font-bold">{stats.total}</p>
-              </div>
-              <Home className="h-8 w-8 text-primary opacity-50" />
-            </div>
+            <p className="text-sm text-gray-500">Total</p>
+            <p className="text-2xl font-bold">{stats.total}</p>
           </CardContent>
         </Card>
-
         <Card>
           <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Active Listings</p>
-                <p className="text-2xl font-bold text-green-600">
-                  {stats.active}
-                </p>
-              </div>
-              <CheckCircle className="h-8 w-8 text-green-500 opacity-50" />
-            </div>
+            <p className="text-sm text-gray-500">Active</p>
+            <p className="text-2xl font-bold text-green-600">{stats.active}</p>
           </CardContent>
         </Card>
-
         <Card>
           <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Rented</p>
-                <p className="text-2xl font-bold text-blue-600">
-                  {stats.rented}
-                </p>
-              </div>
-              <Home className="h-8 w-8 text-blue-500 opacity-50" />
-            </div>
+            <p className="text-sm text-gray-500">Rented</p>
+            <p className="text-2xl font-bold text-blue-600">{stats.rented}</p>
           </CardContent>
         </Card>
-
         <Card>
           <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Pending Approval</p>
-                <p className="text-2xl font-bold text-amber-600">
-                  {stats.pending}
-                </p>
-              </div>
-              <Clock className="h-8 w-8 text-amber-500 opacity-50" />
-            </div>
+            <p className="text-sm text-gray-500">Pending</p>
+            <p className="text-2xl font-bold text-amber-600">{stats.pending}</p>
           </CardContent>
         </Card>
-
         <Card>
           <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Total Views</p>
-                <p className="text-2xl font-bold">{stats.totalViews.toLocaleString()}</p>
-              </div>
-              <Eye className="h-8 w-8 text-purple-500 opacity-50" />
-            </div>
+            <p className="text-sm text-gray-500">Views</p>
+            <p className="text-2xl font-bold">{stats.totalViews.toLocaleString()}</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Properties Table */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Your Properties</CardTitle>
-          <div className="flex items-center gap-2 text-sm text-gray-500">
-            <span>Showing {displayedProperties.length} properties</span>
-          </div>
+          <span className="text-sm text-gray-500">{displayedProperties.length} shown</span>
         </CardHeader>
         <CardContent>
           <AnimatePresence>
@@ -517,18 +388,15 @@ export default function LandlordDashboard() {
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
                 className="text-center py-12"
               >
                 <Building className="h-12 w-12 mx-auto text-gray-400 mb-4" />
                 <h3 className="text-lg font-semibold mb-2">No properties yet</h3>
-                <p className="text-gray-500 mb-4">
-                  Start by adding your first property listing in Eswatini.
-                </p>
+                <p className="text-gray-500 mb-4">Add your first listing on Ekhaya.</p>
                 <Button asChild>
                   <Link href="/dashboard/landlord/add-property">
                     <Plus className="mr-2 h-4 w-4" />
-                    Add Your First Property
+                    Add Property
                   </Link>
                 </Button>
               </motion.div>
@@ -556,17 +424,12 @@ export default function LandlordDashboard() {
                     ))}
                   </TableBody>
                 </Table>
-                
-                {/* Load more trigger */}
                 {hasNextPage && (
                   <div ref={ref} className="flex justify-center py-4">
                     {isFetchingNextPage ? (
                       <Loader2 className="h-6 w-6 animate-spin text-primary" />
                     ) : (
-                      <Button
-                        variant="outline"
-                        onClick={() => fetchNextPage()}
-                      >
+                      <Button variant="outline" onClick={() => fetchNextPage()}>
                         Load More
                       </Button>
                     )}
@@ -578,7 +441,6 @@ export default function LandlordDashboard() {
         </CardContent>
       </Card>
 
-      {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -587,31 +449,21 @@ export default function LandlordDashboard() {
               Delete Property
             </DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete this property? This action cannot
-              be undone. All photos associated with this property will also be
-              permanently removed from storage.
+              This cannot be undone. Photos will be removed as well.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDeleteDialogOpen(false)}
-              disabled={deleting}
-            >
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} disabled={deleting}>
               Cancel
             </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDeleteProperty}
-              disabled={deleting}
-            >
+            <Button variant="destructive" onClick={handleDeleteProperty} disabled={deleting}>
               {deleting ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Deleting...
                 </>
               ) : (
-                'Delete Property & Photos'
+                'Delete'
               )}
             </Button>
           </DialogFooter>
@@ -621,7 +473,6 @@ export default function LandlordDashboard() {
   );
 }
 
-// Property Row Component
 function PropertyRow({ property, onDelete, onStatusChange }: any) {
   const primaryPhoto = getPrimaryPhoto(property.photos);
 
@@ -631,12 +482,7 @@ function PropertyRow({ property, onDelete, onStatusChange }: any) {
         <div className="flex items-center space-x-3">
           <div className="w-12 h-12 bg-gray-100 rounded overflow-hidden relative shrink-0">
             {primaryPhoto ? (
-              <Image
-                src={primaryPhoto.photo_url}
-                alt={property.title}
-                fill
-                className="object-cover"
-              />
+              <Image src={primaryPhoto.photo_url} alt={property.title} fill className="object-cover" />
             ) : (
               <div className="w-full h-full flex items-center justify-center">
                 <Home className="w-6 h-6 text-gray-400" />
@@ -656,32 +502,25 @@ function PropertyRow({ property, onDelete, onStatusChange }: any) {
           </div>
         </div>
       </TableCell>
-      <TableCell>E{property.price.toLocaleString()}</TableCell>
+      <TableCell>E{property.price?.toLocaleString?.() ?? property.price}</TableCell>
       <TableCell>
         <Badge
           variant={
             property.status === 'active'
               ? 'default'
               : property.status === 'pending'
-              ? 'secondary'
-              : property.status === 'rejected'
-              ? 'destructive'
-              : property.status === 'draft'
-              ? 'outline'
-              : 'outline'
+                ? 'secondary'
+                : property.status === 'rejected'
+                  ? 'destructive'
+                  : 'outline'
           }
-          className={
-            property.status === 'active' ? 'bg-green-600' :
-            property.status === 'draft' ? 'border-dashed' : ''
-          }
+          className={property.status === 'active' ? 'bg-green-600' : ''}
         >
-          {property.status === 'draft' ? '📄 Draft' : property.status}
+          {property.status === 'draft' ? 'Draft' : property.status}
         </Badge>
       </TableCell>
       <TableCell>{property.views || 0}</TableCell>
-      <TableCell>
-        {new Date(property.created_at).toLocaleDateString()}
-      </TableCell>
+      <TableCell>{new Date(property.created_at).toLocaleDateString()}</TableCell>
       <TableCell className="text-right">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -692,7 +531,6 @@ function PropertyRow({ property, onDelete, onStatusChange }: any) {
           <DropdownMenuContent align="end">
             <DropdownMenuLabel>Actions</DropdownMenuLabel>
             <DropdownMenuSeparator />
-
             {property.status !== 'draft' && (
               <DropdownMenuItem asChild>
                 <Link href={`/properties/${property.id}`} target="_blank">
@@ -701,64 +539,38 @@ function PropertyRow({ property, onDelete, onStatusChange }: any) {
                 </Link>
               </DropdownMenuItem>
             )}
-
             <DropdownMenuItem asChild>
               <Link href={`/dashboard/landlord/properties/${property.id}`}>
                 <Home className="mr-2 h-4 w-4" />
-                Manage Property
+                Manage
               </Link>
             </DropdownMenuItem>
-
             <DropdownMenuItem asChild>
               <Link href={`/dashboard/landlord/edit-property/${property.id}`}>
                 <Edit className="mr-2 h-4 w-4" />
-                Edit Details
+                Edit
               </Link>
             </DropdownMenuItem>
-
-            {(property.status === 'draft' || property.status === 'pending') && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={() => onStatusChange(property.id, 'active')}
-                  className="text-green-600"
-                >
-                  <CheckCircle className="mr-2 h-4 w-4" />
-                  Submit for Review
-                </DropdownMenuItem>
-              </>
-            )}
-
             {property.status === 'active' && (
               <>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={() => onStatusChange(property.id, 'rented')}
-                >
+                <DropdownMenuItem onClick={() => onStatusChange(property.id, 'rented')}>
                   <CheckCircle className="mr-2 h-4 w-4 text-green-600" />
                   Mark as Rented
                 </DropdownMenuItem>
               </>
             )}
-            
             {property.status === 'rented' && (
               <>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={() => onStatusChange(property.id, 'active')}
-                >
+                <DropdownMenuItem onClick={() => onStatusChange(property.id, 'active')}>
                   <XCircle className="mr-2 h-4 w-4 text-amber-600" />
                   Mark as Available
                 </DropdownMenuItem>
               </>
             )}
-
             <DropdownMenuSeparator />
-
-            <DropdownMenuItem
-              className="text-red-600"
-              onClick={() => onDelete(property.id)}
-            >
+            <DropdownMenuItem className="text-red-600" onClick={() => onDelete(property.id)}>
               <Trash2 className="mr-2 h-4 w-4" />
               Delete
             </DropdownMenuItem>
