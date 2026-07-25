@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
+import { canPostListings } from '@/types/user';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,7 +32,6 @@ export default function UpgradeForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [isSigningUp, setIsSigningUp] = useState(false);
 
   // Pre-fill email from query params
   useEffect(() => {
@@ -43,11 +43,11 @@ export default function UpgradeForm() {
     }
   }, [searchParams, user]);
 
-  // If user is already a landlord, redirect
+  // Already a poster (broker / agent / admin) → dashboard
   useEffect(() => {
-    if (userType === 'landlord') {
+    if (canPostListings(userType)) {
       router.push('/dashboard/landlord');
-      toast.info('You are already a landlord!');
+      toast.info('You can already post listings!');
     }
   }, [userType, router]);
 
@@ -56,19 +56,17 @@ export default function UpgradeForm() {
     setIsLoading(true);
     setError(null);
 
-    // If user is signed in, they need to create a separate landlord account
     if (user) {
       try {
-        // Sign out current user
         await supabase.auth.signOut();
-        
-        // Sign up as landlord with same email
+
+        // New account as broker (default poster role from DOC mapping)
         const { error: signUpError } = await supabase.auth.signUp({
           email,
           password,
           options: {
             data: {
-              user_type: 'landlord',
+              user_type: 'broker',
               full_name: user.user_metadata?.full_name || '',
               phone: user.user_metadata?.phone || '',
             },
@@ -83,21 +81,18 @@ export default function UpgradeForm() {
         }
 
         setSuccess(true);
-        toast.success('Landlord account created! Please check your email to verify.');
-        
-        // Refresh user to get new session
+        toast.success('Broker account created! Please check your email to verify.');
         await refreshUser();
-        
+
         setTimeout(() => {
           router.push('/auth/verify-email');
         }, 2000);
-      } catch (error) {
-        setError(error instanceof Error ? error.message : 'Failed to upgrade account');
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to upgrade account');
         setIsLoading(false);
       }
     } else {
-      // Not signed in - redirect to signup with landlord type
-      router.push(`/auth/signup?type=landlord&email=${encodeURIComponent(email)}`);
+      router.push(`/auth/signup?type=broker&email=${encodeURIComponent(email)}`);
     }
   };
 
@@ -115,12 +110,9 @@ export default function UpgradeForm() {
                 </div>
                 <h3 className="text-lg font-semibold">Upgrade Request Submitted!</h3>
                 <p className="text-gray-600 dark:text-gray-400">
-                  Please check your email to verify your landlord account.
+                  Please check your email to verify your broker account.
                 </p>
-                <Button
-                  onClick={() => router.push('/auth/login')}
-                  className="mt-4"
-                >
+                <Button onClick={() => router.push('/auth/login')} className="mt-4">
                   Go to Login
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
@@ -132,8 +124,8 @@ export default function UpgradeForm() {
     );
   }
 
-  if (userType === 'landlord') {
-    return null; // Will redirect via useEffect
+  if (canPostListings(userType)) {
+    return null;
   }
 
   return (
@@ -143,21 +135,20 @@ export default function UpgradeForm() {
           <CardHeader>
             <div className="flex items-center space-x-2">
               <Building2 className="h-6 w-6 text-purple-600 dark:text-purple-400" />
-              <CardTitle>Become a Landlord</CardTitle>
+              <CardTitle>List properties on Ekhaya</CardTitle>
             </div>
             <CardDescription>
-              Upgrade your account to list properties on Ekhaya
+              Upgrade to a Broker account to post listings
             </CardDescription>
           </CardHeader>
           <CardContent>
             {user ? (
-              // User is signed in - they need to create a separate landlord account
               <>
                 <div className="bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded-lg p-4 mb-6">
                   <p className="text-sm text-amber-800 dark:text-amber-200">
-                    <strong>Note:</strong> You're currently signed in as a renter. 
-                    To become a landlord, you'll need to create a separate landlord 
-                    account with a new password. Your renter account will remain active.
+                    <strong>Note:</strong> You're currently signed in as a seeker.
+                    To post listings, create a separate broker account with a new password.
+                    Your seeker account will remain active.
                   </p>
                 </div>
 
@@ -178,9 +169,7 @@ export default function UpgradeForm() {
                       disabled
                       className="bg-gray-100 dark:bg-gray-800"
                     />
-                    <p className="text-xs text-gray-500">
-                      Using your renter email address
-                    </p>
+                    <p className="text-xs text-gray-500">Using your seeker email address</p>
                   </div>
 
                   <div className="space-y-2">
@@ -195,7 +184,7 @@ export default function UpgradeForm() {
                       minLength={6}
                     />
                     <p className="text-xs text-gray-500">
-                      Must be at least 6 characters (different from your renter password)
+                      Must be at least 6 characters (different from your seeker password)
                     </p>
                   </div>
 
@@ -231,28 +220,27 @@ export default function UpgradeForm() {
                     {isLoading ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Creating Landlord Account...
+                        Creating Broker Account...
                       </>
                     ) : (
                       <>
                         <Building2 className="mr-2 h-4 w-4" />
-                        Upgrade to Landlord
+                        Upgrade to Broker
                       </>
                     )}
                   </Button>
                 </form>
               </>
             ) : (
-              // Not signed in - redirect to signup
               <div className="text-center space-y-4">
                 <p className="text-gray-600 dark:text-gray-400">
-                  You need to create an account to become a landlord.
+                  You need an account to list properties.
                 </p>
                 <Button
-                  onClick={() => router.push('/auth/signup?type=landlord')}
+                  onClick={() => router.push('/auth/signup?type=broker')}
                   className="w-full"
                 >
-                  Create Landlord Account
+                  Create Broker Account
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
                 <Button
