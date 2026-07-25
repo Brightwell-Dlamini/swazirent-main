@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
+import { UserType } from '@/types/user';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -18,11 +19,11 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, User, Building, CheckCircle } from 'lucide-react';
+import { Loader2, User, Building, Briefcase, CheckCircle } from 'lucide-react';
 import { z } from 'zod';
 import SocialLoginButtons from '@/components/auth/SocialLoginButtons';
 
-// Validation schema
+// Validation schema — aligned with Ekhaya personas
 const signUpSchema = z
   .object({
     email: z.string().email('Please enter a valid email address'),
@@ -36,7 +37,7 @@ const signUpSchema = z
         /^(\+268)?[0-9\s\-]+$/,
         'Please enter a valid Eswatini phone number',
       ),
-    userType: z.enum(['renter', 'landlord']),
+    userType: z.enum(['seeker', 'broker', 'agent']),
     agreeToTerms: z.boolean().refine((val) => val === true, {
       message: 'You must agree to the terms and conditions',
     }),
@@ -72,7 +73,7 @@ type FormDataType = {
   confirmPassword: string;
   fullName: string;
   phone: string;
-  userType: 'renter' | 'landlord';
+  userType: 'seeker' | 'broker' | 'agent';
   agreeToTerms: boolean;
 };
 
@@ -91,13 +92,22 @@ export default function SignUpForm() {
   } | null>(null);
   const [isMounted, setIsMounted] = useState(false);
 
+  // Map possible query params (including legacy) to canonical roles
+  const initialTypeParam = searchParams.get('type');
+  const initialUserType: FormDataType['userType'] =
+    initialTypeParam === 'landlord' || initialTypeParam === 'broker'
+      ? 'broker'
+      : initialTypeParam === 'agent'
+        ? 'agent'
+        : 'seeker';
+
   const [formData, setFormData] = useState<FormDataType>({
     email: '',
     password: '',
     confirmPassword: '',
     fullName: '',
     phone: '',
-    userType: (searchParams.get('type') as 'renter' | 'landlord') || 'renter',
+    userType: initialUserType,
     agreeToTerms: false,
   });
 
@@ -148,7 +158,7 @@ export default function SignUpForm() {
       const { error: signUpError } = await signUp(
         formData.email,
         formData.password,
-        formData.userType,
+        formData.userType as UserType,
         formData.fullName,
         formData.phone
       );
@@ -163,7 +173,6 @@ export default function SignUpForm() {
         type: 'verification',
         message: 'Please check your email to verify your account.',
       });
-      
     } catch (error: unknown) {
       console.error('Signup error:', error);
       setError(error instanceof Error ? error.message : 'An error occurred during signup');
@@ -243,12 +252,12 @@ export default function SignUpForm() {
               Create an Account
             </CardTitle>
             <CardDescription className="text-center">
-              Join Ekhaya to find or list properties
+              Join Ekhaya to find or list properties in Eswatini
             </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-6">
-              <SocialLoginButtons 
+              <SocialLoginButtons
                 isLoading={isLoading || authLoading}
                 onError={handleSocialLoginError}
               />
@@ -260,29 +269,49 @@ export default function SignUpForm() {
                   </Alert>
                 )}
 
-                <div className="grid grid-cols-2 gap-4">
-                  <Button
-                    type="button"
-                    variant={formData.userType === 'renter' ? 'default' : 'outline'}
-                    className={`h-20 flex flex-col items-center justify-center space-y-1 ${
-                      formData.userType === 'renter' ? 'bg-primary text-white' : ''
-                    }`}
-                    onClick={() => setFormData({ ...formData, userType: 'renter' })}
-                  >
-                    <User className="h-6 w-6" />
-                    <span>I&apos;m a Renter</span>
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={formData.userType === 'landlord' ? 'default' : 'outline'}
-                    className={`h-20 flex flex-col items-center justify-center space-y-1 ${
-                      formData.userType === 'landlord' ? 'bg-primary text-white' : ''
-                    }`}
-                    onClick={() => setFormData({ ...formData, userType: 'landlord' })}
-                  >
-                    <Building className="h-6 w-6" />
-                    <span>I&apos;m a Landlord</span>
-                  </Button>
+                {/* Persona selection — Seeker / Broker / Agent */}
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">I am a…</Label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <Button
+                      type="button"
+                      variant={formData.userType === 'seeker' ? 'default' : 'outline'}
+                      className={`h-20 flex flex-col items-center justify-center space-y-1 text-xs ${
+                        formData.userType === 'seeker' ? 'bg-primary text-white' : ''
+                      }`}
+                      onClick={() => setFormData({ ...formData, userType: 'seeker' })}
+                    >
+                      <User className="h-5 w-5" />
+                      <span>Seeker</span>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={formData.userType === 'broker' ? 'default' : 'outline'}
+                      className={`h-20 flex flex-col items-center justify-center space-y-1 text-xs ${
+                        formData.userType === 'broker' ? 'bg-primary text-white' : ''
+                      }`}
+                      onClick={() => setFormData({ ...formData, userType: 'broker' })}
+                    >
+                      <Building className="h-5 w-5" />
+                      <span>Broker</span>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={formData.userType === 'agent' ? 'default' : 'outline'}
+                      className={`h-20 flex flex-col items-center justify-center space-y-1 text-xs ${
+                        formData.userType === 'agent' ? 'bg-primary text-white' : ''
+                      }`}
+                      onClick={() => setFormData({ ...formData, userType: 'agent' })}
+                    >
+                      <Briefcase className="h-5 w-5" />
+                      <span>Agent</span>
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {formData.userType === 'seeker' && 'Looking for a place to rent or buy.'}
+                    {formData.userType === 'broker' && 'Individual listing properties or finding tenants.'}
+                    {formData.userType === 'agent' && 'Licensed or established estate agent.'}
+                  </p>
                 </div>
 
                 <div className="space-y-2">
