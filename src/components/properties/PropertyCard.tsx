@@ -7,12 +7,12 @@ import { Property, PropertyPhoto } from '@/types/property';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { MapPin, Bed, Bath, Heart, Eye, CheckCircle, Clock } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
+import { TenureBadge } from './TenureBadge';
 
 interface PropertyCardProps {
   property: Property;
@@ -109,11 +109,12 @@ export function PropertyCard({ property, viewMode = 'grid' }: PropertyCardProps)
                     Verified
                   </Badge>
                 )}
+                <TenureBadge tenure={property.tenure_type} />
                 {property.status === 'active' && (
                   <Badge variant="default">Available</Badge>
                 )}
-                {property.status === 'rented' && (
-                  <Badge variant="secondary">Rented</Badge>
+                {(property.status === 'rented' || property.status === 'taken') && (
+                  <Badge variant="secondary">Taken</Badge>
                 )}
               </div>
               <button
@@ -208,11 +209,12 @@ export function PropertyCard({ property, viewMode = 'grid' }: PropertyCardProps)
                   Verified
                 </Badge>
               )}
+              <TenureBadge tenure={property.tenure_type} />
               {property.status === 'active' && (
                 <Badge variant="default">Available</Badge>
               )}
-              {property.status === 'rented' && (
-                <Badge variant="secondary">Rented</Badge>
+              {(property.status === 'rented' || property.status === 'taken') && (
+                <Badge variant="secondary">Taken</Badge>
               )}
               {property.is_featured && (
                 <Badge className="bg-amber-500 hover:bg-amber-600">
