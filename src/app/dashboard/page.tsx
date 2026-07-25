@@ -4,6 +4,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { getDefaultRedirect } from '@/types/user';
 import { Loader2 } from 'lucide-react';
 
 export default function DashboardRedirect() {
@@ -18,18 +19,7 @@ export default function DashboardRedirect() {
       return;
     }
 
-    switch (userType) {
-      case 'admin':
-        router.push('/dashboard/admin');
-        break;
-      case 'landlord':
-        router.push('/dashboard/landlord');
-        break;
-      case 'renter':
-      default:
-        router.push('/dashboard/renter');
-        break;
-    }
+    router.push(getDefaultRedirect(userType));
   }, [user, userType, isLoading, isInitialized, router]);
 
   return (
