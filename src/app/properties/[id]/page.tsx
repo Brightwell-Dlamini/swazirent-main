@@ -38,6 +38,7 @@ import {
   Dialog,
   DialogContent,
 } from '@/components/ui/dialog';
+import { TenureBadge } from '@/components/properties/TenureBadge';
 
 // Helper to get primary photo
 const getPrimaryPhoto = (photos?: PropertyPhoto[]) => {
@@ -65,21 +66,30 @@ const transformPropertyData = (data: any): ExtendedProperty => {
     description: data.description || '',
     price: data.price || 0,
     property_type: data.property_type || 'other',
+    listing_type: data.listing_type,
     location_city: data.location_city || '',
     location_suburb: data.location_suburb || '',
     location_address: data.location_address || '',
+    area_id: data.area_id,
     latitude: data.latitude,
     longitude: data.longitude,
     bedrooms: data.bedrooms || 0,
     bathrooms: data.bathrooms || 0,
+    size_sqm: data.size_sqm,
     is_furnished: data.is_furnished || false,
     amenities: data.amenities || [],
     lease_terms: data.lease_terms || '',
+    tenure_type: data.tenure_type || 'unsure',
     status: data.status || 'active',
     is_featured: data.is_featured || false,
     views: data.views || 0,
+    save_count: data.save_count,
+    contact_count: data.contact_count,
+    report_count: data.report_count,
     created_at: data.created_at || new Date().toISOString(),
     updated_at: data.updated_at || new Date().toISOString(),
+    published_at: data.published_at,
+    expires_at: data.expires_at,
     contact_phone: data.contact_phone || '',
     contact_whatsapp: data.contact_whatsapp || '',
     country: data.country || 'Eswatini',
@@ -307,7 +317,7 @@ export default function PublicPropertyPage() {
         }
 
         const status = data.status;
-        if (status !== 'active' && status !== 'rented') {
+        if (status !== 'active' && status !== 'rented' && status !== 'taken') {
           setError('This property is not available');
           return;
         }
@@ -434,7 +444,7 @@ export default function PublicPropertyPage() {
       window.location.href = `tel:${phoneNumber}`;
     } else if (method === 'whatsapp') {
       const message = encodeURIComponent(
-        `Hello, I'm interested in your property: ${property.title} (E${property.price}/month)`,
+        `Hi, I saw your property on Ekhaya: ${property.title} (E${property.price}/month) — ${window.location.href}`,
       );
       const phone = property.contact_whatsapp || property.contact_phone;
       const formattedPhone = phone.replace(/\D/g, '');
@@ -642,14 +652,15 @@ export default function PublicPropertyPage() {
                         Verified
                       </Badge>
                     )}
+                    <TenureBadge tenure={property.tenure_type} size="md" />
                     {property.status === 'active' && (
                       <Badge className="bg-primary-600 hover:bg-primary-700 text-white border-0">
                         Available Now
                       </Badge>
                     )}
-                    {property.status === 'rented' && (
+                    {(property.status === 'rented' || property.status === 'taken') && (
                       <Badge variant="secondary" className="bg-gray-500 hover:bg-gray-600 text-white border-0">
-                        Rented
+                        Taken
                       </Badge>
                     )}
                     {property.is_featured && (
@@ -963,6 +974,10 @@ export default function PublicPropertyPage() {
                     <div className="flex justify-between">
                       <span className="text-gray-500 dark:text-gray-400">Status:</span>
                       <span className="capitalize text-gray-900 dark:text-white">{property.status}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-500 dark:text-gray-400">Tenure:</span>
+                      <TenureBadge tenure={property.tenure_type} />
                     </div>
                   </div>
 
