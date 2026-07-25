@@ -1,20 +1,34 @@
 // src/types/user.ts
 // Ekhaya hybrid model — roles aligned with DOC-001 / DOC-005
 // Mapping: former 'renter' → 'seeker', former 'landlord' split into 'broker' | 'agent'
+// Legacy values remain on the union so existing pages still type-check until fully migrated.
 
-export type UserType = 'seeker' | 'agent' | 'broker' | 'admin';
+export type UserType =
+  | 'seeker'
+  | 'agent'
+  | 'broker'
+  | 'admin'
+  | 'landlord' // legacy — treat as broker/poster
+  | 'renter'; // legacy — treat as seeker
 
-/** Legacy values that may still exist in the database during migration */
-export type LegacyUserType = 'renter' | 'landlord' | UserType;
+export type LegacyUserType = UserType;
 
 export const isValidUserType = (type: string | null | undefined): type is UserType => {
-  return type === 'seeker' || type === 'agent' || type === 'broker' || type === 'admin';
+  return (
+    type === 'seeker' ||
+    type === 'agent' ||
+    type === 'broker' ||
+    type === 'admin' ||
+    type === 'landlord' ||
+    type === 'renter'
+  );
 };
 
 /**
- * Normalises any stored role (including legacy values) to the canonical UserType.
+ * Normalises any stored role (including legacy values) to the preferred canonical set.
  * - renter  → seeker
- * - landlord → broker  (default split; agents will be explicitly set later)
+ * - landlord → broker
+ * Prefer calling this when writing to the DB or deciding redirects.
  */
 export const normalizeUserType = (type: string | null | undefined): UserType => {
   if (!type) return 'seeker';
@@ -25,15 +39,16 @@ export const normalizeUserType = (type: string | null | undefined): UserType => 
 };
 
 export const getDefaultRedirect = (userType: UserType | null): string => {
-  switch (userType) {
+  const t = normalizeUserType(userType);
+  switch (t) {
     case 'admin':
       return '/dashboard/admin';
     case 'agent':
-      return '/dashboard/agent';          // future agent dashboard route
+      return '/dashboard/landlord'; // reuse landlord dashboard until agent route exists
     case 'broker':
-      return '/dashboard/landlord';       // reuse existing landlord dashboard for brokers
+      return '/dashboard/landlord';
     case 'seeker':
-      return '/dashboard/renter';         // reuse existing renter dashboard
+      return '/dashboard/renter';
     default:
       return '/dashboard/renter';
   }
@@ -42,7 +57,8 @@ export const getDefaultRedirect = (userType: UserType | null): string => {
 export const getDefaultUserType = (): UserType => 'seeker';
 
 export const getUserTypeLabel = (userType: UserType | null): string => {
-  switch (userType) {
+  const t = normalizeUserType(userType);
+  switch (t) {
     case 'admin':
       return 'Administrator';
     case 'agent':
@@ -57,7 +73,8 @@ export const getUserTypeLabel = (userType: UserType | null): string => {
 };
 
 export const getUserTypeIcon = (userType: UserType | null): string => {
-  switch (userType) {
+  const t = normalizeUserType(userType);
+  switch (t) {
     case 'admin':
       return '👑';
     case 'agent':
@@ -73,5 +90,6 @@ export const getUserTypeIcon = (userType: UserType | null): string => {
 
 /** Roles that are allowed to post listings (must also pass phone verification) */
 export const canPostListings = (userType: UserType | null): boolean => {
-  return userType === 'agent' || userType === 'broker' || userType === 'admin';
+  const t = normalizeUserType(userType);
+  return t === 'agent' || t === 'broker' || t === 'admin';
 };
