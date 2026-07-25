@@ -7,13 +7,16 @@ import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
 import { useVerification } from '@/hooks/useVerification';
 import { supabase } from '@/lib/supabase';
-import { PropertyType } from '@/types/property';
+import { PropertyType, TenureType, TENURE_CONFIG } from '@/types/property';
+import { canPostListings, normalizeUserType } from '@/types/user';
 import {
   ESWATINI_CITIES,
   PROPERTY_TYPES,
+  TENURE_TYPES,
   ESWATINI_AMENITIES,
   ROOM_OPTIONS,
   BATH_OPTIONS,
+  MAX_PHOTOS,
 } from '@/utils/constants';
 import { normalizeEswatiniPhone, isValidEswatiniPhone } from '@/utils/phone';
 import { Button } from '@/components/ui/button';
@@ -46,6 +49,7 @@ import {
 import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { TenureBadge } from '@/components/properties/TenureBadge';
 
 export default function AddPropertyPage() {
   const { user, userType, isLoading: authLoading } = useAuth();
@@ -67,6 +71,7 @@ export default function AddPropertyPage() {
     title: '',
     description: '',
     property_type: '' as PropertyType | '',
+    tenure_type: 'unsure' as TenureType,
     price: '',
     city: '',
     suburb: '',
@@ -82,7 +87,7 @@ export default function AddPropertyPage() {
 
   const totalSteps = 4;
 
-  // Check auth and permissions
+  // Check auth and permissions — allow broker, agent, and legacy landlord
   useEffect(() => {
     if (authLoading) return;
 
@@ -91,7 +96,8 @@ export default function AddPropertyPage() {
       return;
     }
 
-    if (userType && userType !== 'landlord') {
+    const normalized = normalizeUserType(userType);
+    if (userType && !canPostListings(normalized) && normalized !== 'admin') {
       router.push('/dashboard');
       return;
     }
@@ -105,7 +111,8 @@ export default function AddPropertyPage() {
 
   // Refresh verification if pending
   useEffect(() => {
-    if (user && userType === 'landlord' && isLandlordPending) {
+    const normalized = normalizeUserType(userType);
+    if (user && (normalized === 'broker' || normalized === 'agent') && isLandlordPending) {
       refreshVerification();
     }
   }, [user, userType, isLandlordPending, refreshVerification]);
@@ -133,8 +140,8 @@ export default function AddPropertyPage() {
 
   const handlePhotoUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    if (photos.length + files.length > 15) {
-      toast.error('Maximum 15 photos allowed');
+    if (photos.length + files.length > MAX_PHOTOS) {
+      toast.error(`Maximum ${MAX_PHOTOS} photos allowed`);
       return;
     }
 
@@ -161,6 +168,7 @@ export default function AddPropertyPage() {
     if (!formData.title.trim()) errors.push('Please enter a listing title');
     if (!formData.description.trim()) errors.push('Please enter a description');
     if (!formData.property_type) errors.push('Please select a property type');
+    if (!formData.tenure_type) errors.push('Please select land tenure');
     
     const price = parseFloat(formData.price);
     if (!formData.price || isNaN(price) || price <= 0) {
@@ -236,7 +244,7 @@ export default function AddPropertyPage() {
       }
 
       if (!isLandlordVerified) {
-        setError('Your landlord account must be verified before you can publish properties.');
+        setError('Your account must be verified before you can publish properties.');
         return false;
       }
     }
@@ -247,12 +255,12 @@ export default function AddPropertyPage() {
     }
 
     try {
-      // ✅ FIXED: Removed 'country' column - it doesn't exist in the database
       const propertyData = {
         landlord_id: user.id,
         title: formData.title.trim() || 'Untitled Property',
         description: formData.description.trim() || 'No description provided',
-        property_type: formData.property_type || 'apartment',
+        property_type: formData.property_type || 'other',
+        tenure_type: formData.tenure_type || 'unsure',
         price: parseFloat(formData.price) || 0,
         location_city: formData.city || 'Unknown',
         location_suburb: formData.suburb.trim() || 'Unknown',
@@ -267,7 +275,6 @@ export default function AddPropertyPage() {
         status: status,
         views: 0,
         is_featured: false,
-        // country: 'Eswatini', // ❌ REMOVED - column doesn't exist
       };
 
       const { data: property, error: propertyError } = await supabase
@@ -399,6 +406,37 @@ export default function AddPropertyPage() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+
+              {/* Land Tenure — mandatory (DOC-001 FR-005) */}
+              <div>
+                <Label htmlFor="tenure_type">Land Tenure *</Label>
+                <Select
+                  value={formData.tenure_type}
+                  onValueChange={(value) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      tenure_type: value as TenureType,
+                    }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select land tenure" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TENURE_TYPES.map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {TENURE_CONFIG[t].label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Title Deed = freehold. Leasehold = long-term lease. SNL = Swazi Nation Land. Unsure if you do not know.
+                </p>
+                <div className="mt-2">
+                  <TenureBadge tenure={formData.tenure_type} size="md" />
+                </div>
               </div>
 
               <div>
@@ -593,7 +631,7 @@ export default function AddPropertyPage() {
             <h2 className="text-xl font-semibold">Photos & Contact</h2>
 
             <div>
-              <Label>Property Photos (Max 15)</Label>
+              <Label>Property Photos (Max {MAX_PHOTOS})</Label>
               <div className="mt-2">
                 <div className="grid grid-cols-3 md:grid-cols-5 gap-4 mb-4">
                   {photoPreviews.map((preview, index) => (
@@ -621,7 +659,7 @@ export default function AddPropertyPage() {
                     </div>
                   ))}
 
-                  {photos.length < 15 && (
+                  {photos.length < MAX_PHOTOS && (
                     <label className="aspect-square border-2 border-dashed rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-primary transition-colors">
                       <Upload className="h-6 w-6 text-gray-400 mb-1" />
                       <span className="text-xs text-gray-500">Upload</span>
@@ -637,7 +675,7 @@ export default function AddPropertyPage() {
                 </div>
                 <p className="text-sm text-gray-500">
                   Upload clear photos of the property. First photo will be the cover.
-                  {photos.length > 0 && ` (${photos.length}/15)`}
+                  {photos.length > 0 && ` (${photos.length}/${MAX_PHOTOS})`}
                 </p>
               </div>
             </div>
@@ -711,6 +749,12 @@ export default function AddPropertyPage() {
                     <dt className="w-24 text-sm text-gray-500">Type:</dt>
                     <dd className="text-sm capitalize">
                       {formData.property_type || 'Not set'}
+                    </dd>
+                  </div>
+                  <div className="flex items-center">
+                    <dt className="w-24 text-sm text-gray-500">Tenure:</dt>
+                    <dd className="text-sm">
+                      <TenureBadge tenure={formData.tenure_type} />
                     </dd>
                   </div>
                   <div className="flex">
@@ -863,7 +907,7 @@ export default function AddPropertyPage() {
     );
   }
 
-  // Unverified landlord - allow drafts
+  // Unverified - allow drafts
   if (!isLandlordVerified) {
     return (
       <div className="container mx-auto px-4 py-8 max-w-3xl">
@@ -884,7 +928,7 @@ export default function AddPropertyPage() {
               <div>
                 <h3 className="font-semibold text-red-800">Verification Required</h3>
                 <p className="text-red-700 text-sm">
-                  Your landlord account must be verified before you can submit properties.
+                  Your account must be verified before you can submit properties.
                   You can save a draft now and submit it later.
                 </p>
                 <div className="mt-3">
