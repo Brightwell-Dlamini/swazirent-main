@@ -6,26 +6,23 @@ import { supabase } from '@/lib/supabase';
 import { User, AuthError, Session } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
+import {
+  UserType,
+  isValidUserType,
+  normalizeUserType,
+  getDefaultRedirect,
+  getDefaultUserType,
+  canPostListings,
+} from '@/types/user';
 
-export type UserType = 'renter' | 'landlord' | 'admin';
-
-export const isValidUserType = (type: string | null | undefined): type is UserType => {
-  return type === 'renter' || type === 'landlord' || type === 'admin';
-};
-
-export const getDefaultRedirect = (userType: UserType | null): string => {
-  switch (userType) {
-    case 'admin': return '/dashboard/admin';
-    case 'landlord': return '/dashboard/landlord';
-    case 'renter': return '/dashboard/renter';
-    default: return '/dashboard/renter';
-  }
-};
+// Re-export for convenience
+export type { UserType };
+export { isValidUserType, normalizeUserType, getDefaultRedirect, getDefaultUserType, canPostListings };
 
 // Extended User type with proper metadata typing
 export interface ExtendedUser extends User {
   user_metadata: {
-    user_type?: UserType;
+    user_type?: string; // may still contain legacy values
     full_name?: string;
     phone?: string;
     avatar_url?: string;
@@ -46,6 +43,7 @@ interface AuthContextType {
   isLoading: boolean;
   isInitialized: boolean;
   profile: UserProfile | null;
+  canPost: boolean;
   signIn: (email: string, password: string) => Promise<{ error: AuthError | null }>;
   signUp: (
     email: string,
@@ -89,7 +87,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false);
   const router = useRouter();
-  
+
   // Refs to prevent re-fetches and state updates
   const isMountedRef = useRef(true);
   const initialLoadDoneRef = useRef(false);
@@ -102,6 +100,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const userType = profile?.userType || null;
   const isVerified = profile?.isVerified || false;
+  const canPost = canPostListings(userType);
 
   // === CACHE HELPERS ===
 
@@ -109,16 +108,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const cached = localStorage.getItem(AUTH_CACHE_KEY);
       if (!cached) return null;
-      
+
       const data: AuthCache = JSON.parse(cached);
       const now = Date.now();
-      
+
       // Cache for 5 minutes
       if (now - data.timestamp > 5 * 60 * 1000) {
         localStorage.removeItem(AUTH_CACHE_KEY);
         return null;
       }
-      
+
       if (data.user) {
         return {
           id: data.user.id,
@@ -139,15 +138,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const cached = localStorage.getItem(PROFILE_CACHE_KEY);
       if (!cached) return null;
-      
+
       const data: ProfileCache = JSON.parse(cached);
       const now = Date.now();
-      
+
       if (now - data.timestamp > 5 * 60 * 1000) {
         localStorage.removeItem(PROFILE_CACHE_KEY);
         return null;
       }
-      
+
       return data;
     } catch {
       return null;
@@ -196,7 +195,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (
       userId: string,
       email: string,
-      userType: UserType = 'renter',
+      userType: UserType = 'seeker',
       fullName?: string,
       phone?: string
     ): Promise<UserProfile | null> => {
@@ -209,7 +208,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               email,
               full_name: fullName || null,
               phone: phone || null,
-              user_type: userType,
+              user_type: userType, // store canonical value
               is_verified: false,
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
@@ -228,13 +227,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (data) {
-          const profileData = {
-            userType: data.user_type,
+          return {
+            userType: normalizeUserType(data.user_type),
             isVerified: data.is_verified || false,
             fullName: data.full_name,
             phone: data.phone,
           };
-          return profileData;
         }
 
         return null;
@@ -294,7 +292,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (data) {
           const profileData = {
-            userType: data.user_type,
+            userType: normalizeUserType(data.user_type),
             isVerified: data.is_verified || false,
             fullName: data.full_name,
             phone: data.phone,
@@ -318,11 +316,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshUserType = useCallback(async () => {
     if (!user) return;
-    
+
     try {
       const userProfile = await fetchUserProfile(user.id, true);
       if (isMountedRef.current) {
-        // Only update if changed
         const currentProfileStr = JSON.stringify(profileRef.current);
         const newProfileStr = JSON.stringify(userProfile);
         if (currentProfileStr !== newProfileStr) {
@@ -342,14 +339,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const currentUser = session?.user ?? null;
-      
+
       if (currentUser) {
-        // Only update if user changed
         if (!userRef.current || userRef.current.id !== currentUser.id) {
           setUser(currentUser as ExtendedUser);
           userRef.current = currentUser as ExtendedUser;
           cacheUser(currentUser as ExtendedUser);
-          
+
           const userProfile = await fetchUserProfile(currentUser.id, true);
           if (isMountedRef.current) {
             if (JSON.stringify(profileRef.current) !== JSON.stringify(userProfile)) {
@@ -377,7 +373,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [fetchUserProfile, cacheUser, cacheProfile]);
 
   const redirectToDashboard = useCallback(() => {
-    const type = profile?.userType || 'renter';
+    const type = profile?.userType || 'seeker';
     const path = getDefaultRedirect(type);
     router.push(path);
   }, [profile, router]);
@@ -398,31 +394,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (data.user) {
           toast.success('Welcome back!');
 
-          // Set user immediately
           setUser(data.user as ExtendedUser);
           userRef.current = data.user as ExtendedUser;
           cacheUser(data.user as ExtendedUser);
 
-          // Fetch profile
           let userProfile = await fetchUserProfile(data.user.id, true);
 
           if (!userProfile) {
+            const rawType = data.user.user_metadata?.user_type;
+            const canonical = normalizeUserType(rawType);
             userProfile = await createUserProfile(
               data.user.id,
               data.user.email!,
-              data.user.user_metadata?.user_type || 'renter',
+              canonical,
               data.user.user_metadata?.full_name,
               data.user.user_metadata?.phone
             );
 
             if (!userProfile) {
               userProfile = {
-                userType: 'renter',
+                userType: 'seeker',
                 isVerified: false,
                 fullName: data.user.user_metadata?.full_name || data.user.email?.split('@')[0] || 'User',
                 phone: data.user.user_metadata?.phone || null,
               };
-              
+
               try {
                 await supabase
                   .from('profiles')
@@ -431,7 +427,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                     email: data.user.email!,
                     full_name: userProfile.fullName,
                     phone: userProfile.phone,
-                    user_type: 'renter',
+                    user_type: 'seeker',
                     is_verified: false,
                     updated_at: new Date().toISOString(),
                   });
@@ -445,16 +441,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           profileRef.current = userProfile;
           cacheProfile(userProfile);
 
-          const userType = userProfile.userType || 'renter';
-          const redirectPath = getDefaultRedirect(userType);
-          
-          if (!isValidUserType(userType)) {
-            await supabase
-              .from('profiles')
-              .update({ user_type: 'renter' })
-              .eq('id', data.user.id);
-          }
-
+          const redirectPath = getDefaultRedirect(userProfile.userType);
           router.push(redirectPath);
         }
 
@@ -476,7 +463,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           password,
           options: {
             data: {
-              user_type: userType,
+              user_type: userType, // store canonical value from day one
               full_name: fullName,
               phone: phone,
             },
@@ -497,7 +484,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             profileRef.current = profile;
             cacheProfile(profile);
           }
-          
+
           setUser(data.user as ExtendedUser);
           userRef.current = data.user as ExtendedUser;
           cacheUser(data.user as ExtendedUser);
@@ -543,10 +530,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // === OPTIMIZED SESSION CHECK - Only on user interaction ===
   const checkSessionOnUserInteraction = useCallback(async () => {
-    // Only check when user is active and document is visible
     if (document.visibilityState === 'visible') {
       const now = Date.now();
-      // Only check if 5 minutes have passed since last check
       if (now - lastUserCheckRef.current < 5 * 60 * 1000) {
         return;
       }
@@ -564,14 +549,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const initializeAuth = async () => {
       setIsLoading(true);
-      
+
       try {
         // 1. Try to restore from cache FIRST - instant display
         const cachedUser = getCachedUser();
         const cachedProfile = getCachedProfile();
-        
+
         if (cachedUser && cachedProfile) {
-          console.log('🔄 Restored from cache - instant display');
           setUser(cachedUser);
           userRef.current = cachedUser;
           setProfile({
@@ -597,13 +581,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (currentUser) {
           const needUpdate = !cachedUser || cachedUser.id !== currentUser.id;
-          
+
           if (needUpdate) {
-            console.log('🔄 Session changed - updating from Supabase');
             setUser(currentUser as ExtendedUser);
             userRef.current = currentUser as ExtendedUser;
             cacheUser(currentUser as ExtendedUser);
-            
+
             const userProfile = await fetchUserProfile(currentUser.id, true);
             if (isMountedRef.current) {
               if (JSON.stringify(profileRef.current) !== JSON.stringify(userProfile)) {
@@ -616,7 +599,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
         } else if (cachedUser) {
-          console.log('🔄 No session found, clearing cache');
           setUser(null);
           userRef.current = null;
           setProfile(null);
@@ -624,7 +606,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           cacheUser(null);
           cacheProfile(null);
         }
-
       } catch (error) {
         console.error('Error initializing auth:', error);
         if (!getCachedUser()) {
@@ -644,34 +625,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     initializeAuth();
 
-    // === OPTIMIZED: Check session on user interaction instead of interval ===
-    // Listen for visibility change (user returns to tab)
     document.addEventListener('visibilitychange', checkSessionOnUserInteraction);
-    
-    // Listen for user activity (click, scroll, keypress)
+
     const handleUserActivity = () => {
       checkSessionOnUserInteraction();
     };
-    
+
     document.addEventListener('click', handleUserActivity);
     document.addEventListener('scroll', handleUserActivity);
     document.addEventListener('keypress', handleUserActivity);
 
-    // Also check on reconnect
     window.addEventListener('online', checkSessionOnUserInteraction);
 
-    // Listen for auth state changes (only on actual auth events, not tab switches)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        // Only handle actual auth events, not passive checks
         if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') {
           const currentUser = session?.user ?? null;
-          
+
           if (currentUser) {
             setUser(currentUser as ExtendedUser);
             userRef.current = currentUser as ExtendedUser;
             cacheUser(currentUser as ExtendedUser);
-            
+
             const userProfile = await fetchUserProfile(currentUser.id, true);
             if (isMountedRef.current) {
               if (JSON.stringify(profileRef.current) !== JSON.stringify(userProfile)) {
@@ -694,7 +669,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     );
 
-    // Clean up
     return () => {
       if (sessionCheckIntervalRef.current) {
         clearInterval(sessionCheckIntervalRef.current);
@@ -710,20 +684,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []); // Empty dependency array - ONLY RUNS ONCE
 
   // Memoize the value to prevent unnecessary re-renders
-  const value = useMemo(() => ({
-    user,
-    userType,
-    isVerified,
-    isLoading,
-    isInitialized,
-    profile,
-    signIn,
-    signUp,
-    signOut,
-    refreshUser,
-    refreshUserType,
-    redirectToDashboard,
-  }), [user, userType, isVerified, isLoading, isInitialized, profile, signIn, signUp, signOut, refreshUser, refreshUserType, redirectToDashboard]);
+  const value = useMemo(
+    () => ({
+      user,
+      userType,
+      isVerified,
+      isLoading,
+      isInitialized,
+      profile,
+      canPost,
+      signIn,
+      signUp,
+      signOut,
+      refreshUser,
+      refreshUserType,
+      redirectToDashboard,
+    }),
+    [
+      user,
+      userType,
+      isVerified,
+      isLoading,
+      isInitialized,
+      profile,
+      canPost,
+      signIn,
+      signUp,
+      signOut,
+      refreshUser,
+      refreshUserType,
+      redirectToDashboard,
+    ]
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
