@@ -7,14 +7,16 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import { PropertyType, Property } from '@/types/property';
+import { PropertyType, Property, TenureType, TENURE_CONFIG } from '@/types/property';
 import { useMediaUpload } from '@/hooks/useMediaUpload';
 import {
   ESWATINI_CITIES,
   PROPERTY_TYPES,
+  TENURE_TYPES,
   ESWATINI_AMENITIES,
   ROOM_OPTIONS,
   BATH_OPTIONS,
+  MAX_PHOTOS,
 } from '@/utils/constants';
 import { normalizeEswatiniPhone, isValidEswatiniPhone, formatEswatiniPhone } from '@/utils/phone';
 import { Button } from '@/components/ui/button';
@@ -40,6 +42,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { TenureBadge } from '@/components/properties/TenureBadge';
 
 // Helper to extract storage path from Supabase URL
 const extractStoragePath = (url: string): string | null => {
@@ -78,13 +81,14 @@ export default function EditPropertyPage() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   
   const { files: newPhotos, previews: newPhotoPreviews, addFiles: addNewPhotos, removeFile: removeNewPhoto } = useMediaUpload({
-    maxFiles: 15,
+    maxFiles: MAX_PHOTOS,
   });
 
   const [formData, setFormData] = useState({
     title: '',
     description: '',
     property_type: '' as PropertyType | '',
+    tenure_type: 'unsure' as TenureType,
     price: '',
     city: '',
     suburb: '',
@@ -105,6 +109,7 @@ export default function EditPropertyPage() {
         formData.title !== property.title ||
         formData.description !== property.description ||
         formData.property_type !== property.property_type ||
+        formData.tenure_type !== (property.tenure_type || 'unsure') ||
         formData.price !== property.price?.toString() ||
         formData.city !== property.location_city ||
         formData.suburb !== property.location_suburb ||
@@ -176,6 +181,7 @@ export default function EditPropertyPage() {
           title: data.title || '',
           description: data.description || '',
           property_type: data.property_type || '',
+          tenure_type: (data.tenure_type as TenureType) || 'unsure',
           price: data.price?.toString() || '',
           city: data.location_city || '',
           suburb: data.location_suburb || '',
@@ -257,7 +263,7 @@ export default function EditPropertyPage() {
       // Validate required fields
       if (!formData.title || !formData.description || !formData.price ||
           !formData.city || !formData.suburb || !formData.property_type ||
-          !formData.contact_phone) {
+          !formData.contact_phone || !formData.tenure_type) {
         setError('Please fill in all required fields');
         setSaving(false);
         return;
@@ -318,13 +324,13 @@ export default function EditPropertyPage() {
       }
 
       // 2. Update property
-      // ✅ FIXED: Removed 'country' column - it doesn't exist in the database
       const { error: updateError } = await supabase
         .from('properties')
         .update({
           title: formData.title.trim(),
           description: formData.description.trim(),
           property_type: formData.property_type,
+          tenure_type: formData.tenure_type,
           price: price,
           location_city: formData.city,
           location_suburb: formData.suburb.trim(),
@@ -337,7 +343,6 @@ export default function EditPropertyPage() {
           contact_whatsapp: formData.contact_whatsapp.trim() || null,
           contact_phone: normalizedPhone,
           updated_at: new Date().toISOString(),
-          // country: 'Eswatini', // ❌ REMOVED - column doesn't exist
         })
         .eq('id', propertyId);
 
@@ -528,6 +533,37 @@ export default function EditPropertyPage() {
                   </Select>
                 </div>
 
+                {/* Land Tenure — mandatory */}
+                <div>
+                  <Label htmlFor="tenure_type">Land Tenure *</Label>
+                  <Select
+                    value={formData.tenure_type}
+                    onValueChange={(value) =>
+                      setFormData({
+                        ...formData,
+                        tenure_type: value as TenureType,
+                      })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select land tenure" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TENURE_TYPES.map((t) => (
+                        <SelectItem key={t} value={t}>
+                          {TENURE_CONFIG[t].label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Title Deed = freehold. Leasehold = long-term lease. SNL = Swazi Nation Land. Unsure if you do not know.
+                  </p>
+                  <div className="mt-2">
+                    <TenureBadge tenure={formData.tenure_type} size="md" />
+                  </div>
+                </div>
+
                 <div>
                   <Label htmlFor="price">Monthly Rent (E) *</Label>
                   <Input
@@ -711,7 +747,7 @@ export default function EditPropertyPage() {
             <div className="border-t pt-6">
               <h2 className="text-xl font-semibold mb-4">Photos</h2>
               <div>
-                <Label>Property Photos (Max 15)</Label>
+                <Label>Property Photos (Max {MAX_PHOTOS})</Label>
                 <div className="mt-2">
                   {/* Existing Photos */}
                   {existingPhotos.filter(p => !photosToDelete.includes(p.id)).length > 0 && (
@@ -815,7 +851,7 @@ export default function EditPropertyPage() {
                   )}
 
                   {/* Upload Button */}
-                  {(existingPhotos.length - photosToDelete.length + newPhotos.length) < 15 && (
+                  {(existingPhotos.length - photosToDelete.length + newPhotos.length) < MAX_PHOTOS && (
                     <label className="aspect-square border-2 border-dashed rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-primary transition-colors p-4">
                       <Upload className="h-6 w-6 text-gray-400 mb-1" />
                       <span className="text-xs text-gray-500">Upload New Photos</span>
@@ -832,7 +868,7 @@ export default function EditPropertyPage() {
                     Upload clear photos of the property. First photo will be the cover.
                     {existingPhotos.length - photosToDelete.length + newPhotos.length > 0 && (
                       <span className="ml-2">
-                        ({existingPhotos.length - photosToDelete.length + newPhotos.length}/15)
+                        ({existingPhotos.length - photosToDelete.length + newPhotos.length}/{MAX_PHOTOS})
                       </span>
                     )}
                   </p>
