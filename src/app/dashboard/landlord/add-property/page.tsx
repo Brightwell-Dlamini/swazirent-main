@@ -8,39 +8,19 @@ import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { useVerification } from '@/hooks/useVerification';
 import { usePhoneVerification } from '@/hooks/usePhoneVerification';
+import { useListingPhotos } from '@/hooks/useListingPhotos';
 import { supabase } from '@/lib/supabase';
 import {
-  AssetCategory,
-  ListingIntent,
-  TenureType,
-  FitOut,
-  TENURE_CONFIG,
-  RESIDENTIAL_SUBTYPE_LABELS,
-  LAND_SUBTYPE_LABELS,
-  COMMERCIAL_SUBTYPE_LABELS,
-  FIT_OUT_LABELS,
-  LISTING_INTENT_LABELS,
-  ASSET_CATEGORY_LABELS,
-  defaultPricePeriod,
-  subtypeToLegacyPropertyType,
-  ResidentialSubtype,
-  LandSubtype,
-  CommercialSubtype,
+  AssetCategory, ListingIntent, TenureType, FitOut, TENURE_CONFIG,
+  RESIDENTIAL_SUBTYPE_LABELS, LAND_SUBTYPE_LABELS, COMMERCIAL_SUBTYPE_LABELS,
+  FIT_OUT_LABELS, LISTING_INTENT_LABELS, ASSET_CATEGORY_LABELS, defaultPricePeriod,
+  subtypeToLegacyPropertyType, ResidentialSubtype, LandSubtype, CommercialSubtype,
 } from '@/types/property';
 import { canPostListings, normalizeUserType } from '@/types/user';
 import {
-  ESWATINI_CITIES,
-  TENURE_TYPES,
-  RESIDENTIAL_SUBTYPES,
-  LAND_SUBTYPES,
-  COMMERCIAL_SUBTYPES,
-  FIT_OUT_OPTIONS,
-  RESIDENTIAL_AMENITIES,
-  LAND_AMENITIES,
-  COMMERCIAL_AMENITIES,
-  ROOM_OPTIONS,
-  BATH_OPTIONS,
-  MAX_PHOTOS,
+  ESWATINI_CITIES, TENURE_TYPES, RESIDENTIAL_SUBTYPES, LAND_SUBTYPES, COMMERCIAL_SUBTYPES,
+  FIT_OUT_OPTIONS, RESIDENTIAL_AMENITIES, LAND_AMENITIES, COMMERCIAL_AMENITIES,
+  ROOM_OPTIONS, BATH_OPTIONS, MAX_PHOTOS,
 } from '@/utils/constants';
 import { normalizeEswatiniPhone, isValidEswatiniPhone } from '@/utils/phone';
 import { Button } from '@/components/ui/button';
@@ -56,17 +36,19 @@ import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
 import {
   ChevronLeft, ChevronRight, Loader2, Upload, X, Save, Eye, AlertCircle, Clock,
-  Smartphone, Home, Map, Building2,
+  Home, Map, Building2,
 } from 'lucide-react';
 import { TenureBadge } from '@/components/properties/TenureBadge';
 import { PhoneVerifyDialog } from '@/components/auth/PhoneVerifyDialog';
+import { ContactPhoneFields } from '@/components/listings/ContactPhoneFields';
 
 const TOTAL_STEPS = 5;
 
 export default function AddPropertyPage() {
   const { user, userType, isLoading: authLoading } = useAuth();
   const { isLandlordVerified, isLandlordPending, refreshVerification } = useVerification();
-  const { isPhoneVerified, refresh: refreshPhone } = usePhoneVerification();
+  const { isPhoneVerified, phone: accountPhone, refresh: refreshPhone } = usePhoneVerification();
+  const { photos, photoPreviews, compressing, handlePhotoUpload, removePhoto } = useListingPhotos(MAX_PHOTOS);
   const router = useRouter();
 
   const [currentStep, setCurrentStep] = useState(1);
@@ -76,8 +58,6 @@ export default function AddPropertyPage() {
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
   const [phoneDialogOpen, setPhoneDialogOpen] = useState(false);
-  const [photos, setPhotos] = useState<File[]>([]);
-  const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
 
   const [formData, setFormData] = useState({
     asset_category: '' as AssetCategory | '',
@@ -116,6 +96,15 @@ export default function AddPropertyPage() {
   const isLand = formData.asset_category === 'land';
   const isResidential = formData.asset_category === 'residential';
   const isCommercial = formData.asset_category === 'commercial';
+
+  // Autofill contact from verified account phone (once)
+  useEffect(() => {
+    if (!accountPhone) return;
+    setFormData((p) => {
+      if (p.contact_phone) return p;
+      return { ...p, contact_phone: accountPhone };
+    });
+  }, [accountPhone]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -160,29 +149,8 @@ export default function AddPropertyPage() {
     }));
   }, []);
 
-  const handlePhotoUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    if (photos.length + files.length > MAX_PHOTOS) {
-      toast.error(`Maximum ${MAX_PHOTOS} photos`);
-      return;
-    }
-    setPhotos((prev) => [...prev, ...files]);
-    setPhotoPreviews((prev) => [...prev, ...files.map((f) => URL.createObjectURL(f))]);
-  }, [photos.length]);
-
-  const removePhoto = useCallback((index: number) => {
-    setPhotos((prev) => prev.filter((_, i) => i !== index));
-    URL.revokeObjectURL(photoPreviews[index]);
-    setPhotoPreviews((prev) => prev.filter((_, i) => i !== index));
-  }, [photoPreviews]);
-
   const setCategory = (cat: AssetCategory) => {
-    setFormData((p) => ({
-      ...p,
-      asset_category: cat,
-      property_subtype: '',
-      amenities: [],
-    }));
+    setFormData((p) => ({ ...p, asset_category: cat, property_subtype: '', amenities: [] }));
   };
 
   const validateForm = (): { valid: boolean; errors: string[] } => {
@@ -325,8 +293,6 @@ export default function AddPropertyPage() {
     if (id) { toast.success('Draft saved'); router.push('/dashboard/landlord'); }
     setSavingDraft(false);
   };
-
-  useEffect(() => () => photoPreviews.forEach((p) => URL.revokeObjectURL(p)), [photoPreviews]);
 
   const priceLabel = formData.listing_intent === 'sale' ? 'Sale price (E) *' : 'Monthly rent (E) *';
   const stepLabels = ['Category', 'Basics', 'Location', 'Details', 'Photos'];
@@ -592,23 +558,23 @@ export default function AddPropertyPage() {
                 </div>
               ))}
               {photos.length < MAX_PHOTOS && (
-                <label className="aspect-square border-2 border-dashed rounded-lg flex flex-col items-center justify-center cursor-pointer">
-                  <Upload className="h-5 w-5 mb-1" /><span className="text-xs">Upload</span>
-                  <input type="file" accept="image/*" multiple className="hidden" onChange={handlePhotoUpload} />
+                <label className="aspect-square border-2 border-dashed rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-primary/50 transition-colors">
+                  {compressing ? <Loader2 className="h-5 w-5 animate-spin" /> : <Upload className="h-5 w-5 mb-1" />}
+                  <span className="text-xs">{compressing ? 'Optimizing…' : 'Upload'}</span>
+                  <input type="file" accept="image/*" multiple className="hidden" onChange={handlePhotoUpload} disabled={compressing} />
                 </label>
               )}
             </div>
+            <p className="text-xs text-muted-foreground">Photos are compressed on your device for faster upload.</p>
             {uploadProgress && <Progress value={(uploadProgress.current / uploadProgress.total) * 100} />}
-            <div><Label>Phone *</Label><Input value={formData.contact_phone} onChange={(e) => setFormData((p) => ({ ...p, contact_phone: e.target.value.replace(/[^\d+]/g, '') }))} /></div>
-            <div><Label>WhatsApp</Label><Input value={formData.contact_whatsapp} onChange={(e) => setFormData((p) => ({ ...p, contact_whatsapp: e.target.value.replace(/[^\d+]/g, '') }))} /></div>
-            {!isPhoneVerified && (
-              <Alert className="border-amber-500/30 bg-amber-500/10">
-                <AlertDescription className="flex justify-between gap-2 flex-wrap">
-                  <span className="flex items-center gap-2"><Smartphone className="h-4 w-4" /> Verify phone to publish</span>
-                  <Button type="button" size="sm" variant="outline" onClick={() => setPhoneDialogOpen(true)}>Verify</Button>
-                </AlertDescription>
-              </Alert>
-            )}
+            <ContactPhoneFields
+              contactPhone={formData.contact_phone}
+              contactWhatsapp={formData.contact_whatsapp}
+              onPhoneChange={(v) => setFormData((p) => ({ ...p, contact_phone: v }))}
+              onWhatsappChange={(v) => setFormData((p) => ({ ...p, contact_whatsapp: v }))}
+              isPhoneVerified={isPhoneVerified}
+              onRequestVerify={() => setPhoneDialogOpen(true)}
+            />
           </div>
         );
       default:
@@ -624,14 +590,14 @@ export default function AddPropertyPage() {
   return (
     <div className="container mx-auto px-4 py-8 max-w-3xl">
       <Button variant="ghost" asChild className="mb-4"><Link href="/dashboard/landlord"><ChevronLeft className="h-4 w-4 mr-1" />Back</Link></Button>
-      <h1 className="text-3xl font-bold mb-1">Add listing</h1>
+      <h1 className="text-3xl font-bold mb-1 tracking-tight">Add listing</h1>
       <p className="text-muted-foreground mb-6">Residential, land, or commercial</p>
 
       {!isLandlordVerified && (
         <Card className="border-amber-500/30 bg-amber-500/10 mb-6">
           <CardContent className="p-4 flex gap-3">
             {isLandlordPending ? <Clock className="h-6 w-6 text-amber-600" /> : <AlertCircle className="h-6 w-6 text-red-600" />}
-            <p className="text-sm">Drafts allowed now. Publish needs verification + phone OTP.</p>
+            <p className="text-sm">Drafts allowed now. Publish needs account verification + phone.</p>
           </CardContent>
         </Card>
       )}
@@ -670,7 +636,7 @@ export default function AddPropertyPage() {
       </form>
 
       <PhoneVerifyDialog open={phoneDialogOpen} onOpenChange={setPhoneDialogOpen}
-        defaultPhone={formData.contact_phone}
+        defaultPhone={formData.contact_phone || accountPhone || ''}
         onVerified={() => { refreshPhone(); toast.success('Phone verified'); }} />
     </div>
   );
