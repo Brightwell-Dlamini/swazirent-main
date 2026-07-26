@@ -1,1 +1,3 @@
-PLACEHOLDER_SEE_NEXT
+'use client';
+
+export { default } from './AdminDashboardView';
