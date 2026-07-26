@@ -11,11 +11,16 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   MapPin, Home, Bed, Bath, Calendar, Phone, Mail, Share2, Heart,
-  CheckCircle, MessageCircle, Navigation, ArrowLeft, Loader2, AlertCircle,
-  ChevronLeft, ChevronRight, X, Maximize2,
+  CheckCircle, MessageCircle, ArrowLeft, Loader2, AlertCircle,
+  ChevronLeft, ChevronRight, X, Ruler, Building2,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { PropertyPhoto, ExtendedProperty } from '@/types/property';
+import {
+  PropertyPhoto, ExtendedProperty,
+  formatPricePeriod, inferAssetCategory, inferListingIntent,
+  subtypeLabel, ASSET_CATEGORY_LABELS, LISTING_INTENT_LABELS, FIT_OUT_LABELS,
+} from '@/types/property';
+import { mapPropertyRow } from '@/lib/mapProperty';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
@@ -23,70 +28,16 @@ import { TenureBadge } from '@/components/properties/TenureBadge';
 import { ReportListingDialog, ReportReason } from '@/components/properties/ReportListingDialog';
 
 const getPrimaryPhoto = (photos?: PropertyPhoto[]) => {
-  if (!photos || photos.length === 0) return null;
+  if (!photos?.length) return null;
   return [...photos].sort((a, b) => a.display_order - b.display_order)[0];
 };
 
-const transformPropertyData = (data: any): ExtendedProperty => {
-  if (!data) throw new Error('No property data');
-  const photos = Array.isArray(data.photos) ? data.photos : [];
-  const landlord = data.landlord || {
-    full_name: 'Property Owner',
-    phone: data.contact_phone || '',
-    is_verified: false,
-    email: data.contact_email || '',
-  };
-  return {
-    id: data.id,
-    landlord_id: data.landlord_id || '',
-    title: data.title || 'Unnamed Property',
-    description: data.description || '',
-    price: data.price || 0,
-    property_type: data.property_type || 'other',
-    listing_type: data.listing_type,
-    location_city: data.location_city || '',
-    location_suburb: data.location_suburb || '',
-    location_address: data.location_address || '',
-    area_id: data.area_id,
-    latitude: data.latitude,
-    longitude: data.longitude,
-    bedrooms: data.bedrooms || 0,
-    bathrooms: data.bathrooms || 0,
-    size_sqm: data.size_sqm,
-    is_furnished: data.is_furnished || false,
-    amenities: data.amenities || [],
-    lease_terms: data.lease_terms || '',
-    tenure_type: data.tenure_type || 'unsure',
-    status: data.status || 'active',
-    is_featured: data.is_featured || false,
-    views: data.views || 0,
-    save_count: data.save_count,
-    contact_count: data.contact_count,
-    report_count: data.report_count,
-    created_at: data.created_at || new Date().toISOString(),
-    updated_at: data.updated_at || new Date().toISOString(),
-    published_at: data.published_at,
-    expires_at: data.expires_at,
-    contact_phone: data.contact_phone || '',
-    contact_whatsapp: data.contact_whatsapp || '',
-    country: data.country || 'Eswatini',
-    landlord,
-    photos,
-  };
-};
-
 const formatEswatiniPhone = (phone: string): string => {
-  if (!phone) return 'No phone number';
+  if (!phone) return 'No phone';
   const cleaned = phone.replace(/\D/g, '');
-  if (cleaned.startsWith('268')) {
+  if (cleaned.startsWith('268') && cleaned.length >= 11) {
     const local = cleaned.slice(3);
-    if (local.length === 8) return `+268 ${local.slice(0, 4)} ${local.slice(4)}`;
-    if (local.length === 7) return `+268 ${local.slice(0, 3)} ${local.slice(3, 5)} ${local.slice(5)}`;
-    return `+268 ${local}`;
-  }
-  if (cleaned.startsWith('0') && cleaned.length === 9) {
-    const number = cleaned.slice(1);
-    return `+268 ${number.slice(0, 3)} ${number.slice(3, 6)} ${number.slice(6)}`;
+    return `+268 ${local.slice(0, 4)} ${local.slice(4)}`;
   }
   if (cleaned.length === 8) return `+268 ${cleaned.slice(0, 4)} ${cleaned.slice(4)}`;
   return phone.startsWith('+') ? phone : `+${cleaned}`;
@@ -97,30 +48,33 @@ const ImageLightbox = ({
 }: { images: string[]; initialIndex: number; onClose: () => void }) => {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
       if (e.key === 'ArrowLeft') setCurrentIndex((p) => Math.max(0, p - 1));
       if (e.key === 'ArrowRight') setCurrentIndex((p) => Math.min(images.length - 1, p + 1));
     };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
   }, [images.length, onClose]);
   return (
     <Dialog open onOpenChange={() => onClose()}>
       <DialogContent className="max-w-[95vw] max-h-[95vh] p-0 bg-black/95 border-none">
         <div className="relative w-full h-[85vh] flex items-center justify-center">
-          <Button variant="ghost" size="icon" className="absolute top-4 right-4 z-10 bg-black/50 text-white rounded-full" onClick={onClose}>
+          <Button variant="ghost" size="icon" className="absolute top-4 right-4 z-10 text-white" onClick={onClose}>
             <X className="h-6 w-6" />
           </Button>
           <div className="relative w-full h-full">
-            <Image src={images[currentIndex]} alt={`Property image ${currentIndex + 1}`} fill className="object-contain" priority />
+            <Image src={images[currentIndex]} alt="" fill className="object-contain" priority />
           </div>
           {images.length > 1 && (
             <>
-              <Button variant="ghost" size="icon" className="absolute left-4 top-1/2 -translate-y-1/2 bg-black/50 text-white rounded-full h-12 w-12" onClick={() => setCurrentIndex((p) => Math.max(0, p - 1))} disabled={currentIndex === 0}>
+              <Button variant="ghost" size="icon" className="absolute left-4 top-1/2 -translate-y-1/2 text-white h-12 w-12"
+                onClick={() => setCurrentIndex((p) => Math.max(0, p - 1))} disabled={currentIndex === 0}>
                 <ChevronLeft className="h-6 w-6" />
               </Button>
-              <Button variant="ghost" size="icon" className="absolute right-4 top-1/2 -translate-y-1/2 bg-black/50 text-white rounded-full h-12 w-12" onClick={() => setCurrentIndex((p) => Math.min(images.length - 1, p + 1))} disabled={currentIndex === images.length - 1}>
+              <Button variant="ghost" size="icon" className="absolute right-4 top-1/2 -translate-y-1/2 text-white h-12 w-12"
+                onClick={() => setCurrentIndex((p) => Math.min(images.length - 1, p + 1))}
+                disabled={currentIndex === images.length - 1}>
                 <ChevronRight className="h-6 w-6" />
               </Button>
               <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-white text-sm bg-black/60 px-4 py-2 rounded-full">
@@ -134,18 +88,102 @@ const ImageLightbox = ({
   );
 };
 
-const Breadcrumb = memo(({ property }: { property: ExtendedProperty }) => (
-  <nav className="text-sm text-gray-500" aria-label="Breadcrumb">
+const Breadcrumb = memo(({ title }: { title: string }) => (
+  <nav className="text-sm text-muted-foreground" aria-label="Breadcrumb">
     <ol className="flex items-center space-x-2 flex-wrap">
-      <li><Link href="/" className="hover:text-primary-600">Home</Link></li>
+      <li><Link href="/" className="hover:text-primary">Home</Link></li>
       <li><ChevronRight className="h-4 w-4" /></li>
-      <li><Link href="/search" className="hover:text-primary-600">Search</Link></li>
+      <li><Link href="/search" className="hover:text-primary">Search</Link></li>
       <li><ChevronRight className="h-4 w-4" /></li>
-      <li className="text-gray-700 truncate max-w-[200px]">{property.title}</li>
+      <li className="text-foreground truncate max-w-[200px]">{title}</li>
     </ol>
   </nav>
 ));
 Breadcrumb.displayName = 'Breadcrumb';
+
+function SpecsGrid({ property }: { property: ExtendedProperty }) {
+  const category = inferAssetCategory(property);
+  const intent = inferListingIntent(property);
+
+  if (category === 'land') {
+    return (
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <div className="text-center p-3 bg-muted rounded-lg">
+          <Ruler className="h-5 w-5 mx-auto mb-1 text-primary" />
+          <div className="font-semibold">{property.land_size_ha ?? '—'} ha</div>
+          <div className="text-sm text-muted-foreground">Size</div>
+        </div>
+        <div className="text-center p-3 bg-muted rounded-lg">
+          <Home className="h-5 w-5 mx-auto mb-1 text-primary" />
+          <div className="font-semibold text-sm">{property.is_fenced ? 'Yes' : 'No'}</div>
+          <div className="text-sm text-muted-foreground">Fenced</div>
+        </div>
+        <div className="text-center p-3 bg-muted rounded-lg">
+          <MapPin className="h-5 w-5 mx-auto mb-1 text-primary" />
+          <div className="font-semibold text-sm">{subtypeLabel(property.property_subtype)}</div>
+          <div className="text-sm text-muted-foreground">Type</div>
+        </div>
+        <div className="text-center p-3 bg-muted rounded-lg">
+          <Calendar className="h-5 w-5 mx-auto mb-1 text-primary" />
+          <div className="font-semibold text-sm">{LISTING_INTENT_LABELS[intent]}</div>
+          <div className="text-sm text-muted-foreground">Offer</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (category === 'commercial') {
+    return (
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <div className="text-center p-3 bg-muted rounded-lg">
+          <Building2 className="h-5 w-5 mx-auto mb-1 text-primary" />
+          <div className="font-semibold">{property.floor_area_sqm ?? '—'} m²</div>
+          <div className="text-sm text-muted-foreground">Floor area</div>
+        </div>
+        <div className="text-center p-3 bg-muted rounded-lg">
+          <Home className="h-5 w-5 mx-auto mb-1 text-primary" />
+          <div className="font-semibold text-sm">{subtypeLabel(property.property_subtype)}</div>
+          <div className="text-sm text-muted-foreground">Type</div>
+        </div>
+        <div className="text-center p-3 bg-muted rounded-lg">
+          <div className="font-semibold">{property.parking_bays ?? '—'}</div>
+          <div className="text-sm text-muted-foreground">Parking</div>
+        </div>
+        <div className="text-center p-3 bg-muted rounded-lg">
+          <div className="font-semibold text-sm">
+            {property.fit_out ? FIT_OUT_LABELS[property.fit_out] : '—'}
+          </div>
+          <div className="text-sm text-muted-foreground">Fit-out</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+      <div className="text-center p-3 bg-muted rounded-lg">
+        <Bed className="h-5 w-5 mx-auto mb-1 text-primary" />
+        <div className="font-semibold">{property.bedrooms ?? '—'}</div>
+        <div className="text-sm text-muted-foreground">Bedrooms</div>
+      </div>
+      <div className="text-center p-3 bg-muted rounded-lg">
+        <Bath className="h-5 w-5 mx-auto mb-1 text-primary" />
+        <div className="font-semibold">{property.bathrooms ?? '—'}</div>
+        <div className="text-sm text-muted-foreground">Bathrooms</div>
+      </div>
+      <div className="text-center p-3 bg-muted rounded-lg">
+        <Home className="h-5 w-5 mx-auto mb-1 text-primary" />
+        <div className="font-semibold text-sm">{subtypeLabel(property.property_subtype || property.property_type)}</div>
+        <div className="text-sm text-muted-foreground">Type</div>
+      </div>
+      <div className="text-center p-3 bg-muted rounded-lg">
+        <Calendar className="h-5 w-5 mx-auto mb-1 text-primary" />
+        <div className="font-semibold text-sm">{new Date(property.created_at).toLocaleDateString()}</div>
+        <div className="text-sm text-muted-foreground">Listed</div>
+      </div>
+    </div>
+  );
+}
 
 export default function PublicPropertyPage() {
   const params = useParams();
@@ -159,14 +197,12 @@ export default function PublicPropertyPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [similarProperties, setSimilarProperties] = useState<ExtendedProperty[]>([]);
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
-  const [lightboxIndex, setLightboxIndex] = useState(0);
   const [reportOpen, setReportOpen] = useState(false);
   const viewRecordedRef = useRef(false);
   const fetchedRef = useRef(false);
 
   const photoUrls = useMemo(() => property?.photos?.map((p) => p.photo_url) || [], [property?.photos]);
-  const displayPhone = useMemo(() => (property ? formatEswatiniPhone(property.contact_phone) : 'No phone number'), [property]);
-  const landlordEmail = useMemo(() => property?.landlord?.email, [property?.landlord?.email]);
+  const displayPhone = useMemo(() => (property ? formatEswatiniPhone(property.contact_phone) : ''), [property]);
 
   useEffect(() => {
     if (fetchedRef.current) return;
@@ -195,31 +231,45 @@ export default function PublicPropertyPage() {
           return;
         }
 
-        const propertyData = transformPropertyData(data);
-        setProperty(propertyData);
+        const mapped = mapPropertyRow(data) as ExtendedProperty;
+        mapped.landlord = data.landlord || mapped.landlord;
+        mapped.photos = data.photos || [];
+        setProperty(mapped);
 
         if (user) {
           try {
             const { data: savedData } = await supabase
-              .from('saved_properties')
-              .select('id')
-              .eq('renter_id', user.id)
-              .eq('property_id', propertyId)
-              .maybeSingle();
+              .from('saved_properties').select('id')
+              .eq('renter_id', user.id).eq('property_id', propertyId).maybeSingle();
             setIsSaved(!!savedData);
           } catch { /* ignore */ }
         }
 
-        const { data: similar } = await supabase
+        const category = inferAssetCategory(mapped);
+        let similarQuery = supabase
           .from('properties')
-          .select(`*, landlord:profiles!properties_landlord_id_fkey (full_name, phone, is_verified, email), photos:property_photos (id, photo_url, display_order)`)
+          .select(`*, landlord:profiles!properties_landlord_id_fkey (full_name, phone, is_verified, email), photos:property_photos (id, photo_url, display_order, created_at)`)
           .eq('status', 'active')
-          .eq('location_city', propertyData.location_city)
-          .eq('property_type', propertyData.property_type)
-          .neq('id', propertyData.id)
+          .eq('location_city', mapped.location_city)
+          .neq('id', mapped.id)
           .limit(3)
           .order('created_at', { ascending: false });
-        if (similar) setSimilarProperties(similar.map((item: any) => transformPropertyData(item)));
+
+        if (mapped.asset_category) {
+          similarQuery = similarQuery.eq('asset_category', mapped.asset_category);
+        }
+
+        const { data: similar } = await similarQuery;
+        if (similar) {
+          setSimilarProperties(
+            similar.map((item: any) => {
+              const m = mapPropertyRow(item) as ExtendedProperty;
+              m.landlord = item.landlord || m.landlord;
+              m.photos = item.photos || [];
+              return m;
+            })
+          );
+        }
 
         if (!viewRecordedRef.current) {
           viewRecordedRef.current = true;
@@ -233,7 +283,7 @@ export default function PublicPropertyPage() {
         }
       } catch (err) {
         console.error(err);
-        setError('Failed to load property details');
+        setError('Failed to load property');
       } finally {
         setLoading(false);
       }
@@ -248,25 +298,23 @@ export default function PublicPropertyPage() {
     if (method === 'phone') {
       window.location.href = `tel:${property.contact_phone.replace(/\D/g, '')}`;
     } else if (method === 'whatsapp') {
-      const msg = encodeURIComponent(`Hi, I saw your property on Ekhaya: ${property.title} (E${property.price}/month) — ${window.location.href}`);
+      const msg = encodeURIComponent(`Hi, I saw your listing on Ekhaya: ${property.title} — ${window.location.href}`);
       const phone = (property.contact_whatsapp || property.contact_phone).replace(/\D/g, '');
       window.open(`https://wa.me/${phone}?text=${msg}`, '_blank');
-    } else if (method === 'email') {
+    } else {
       const email = property.landlord?.email;
       if (email) {
-        window.location.href = `mailto:${email}?subject=${encodeURIComponent(`Property Inquiry: ${property.title}`)}&body=${encodeURIComponent(`Hello,\n\nI'm interested in "${property.title}" at E${property.price}/month.\n\nThank you.`)}`;
-      } else {
-        toast.info('Email not available');
-      }
+        window.location.href = `mailto:${email}?subject=${encodeURIComponent(`Inquiry: ${property.title}`)}`;
+      } else toast.info('Email not available');
     }
   }, [property]);
 
   const handleShare = useCallback(async () => {
     if (!property) return;
     if (navigator.share) {
-      try { await navigator.share({ title: property.title, text: `Check out this property in ${property.location_city}`, url: window.location.href }); } catch { /* */ }
+      try { await navigator.share({ title: property.title, url: window.location.href }); } catch { /* */ }
     } else {
-      try { await navigator.clipboard.writeText(window.location.href); toast.success('Link copied!'); } catch { toast.error('Failed to copy'); }
+      try { await navigator.clipboard.writeText(window.location.href); toast.success('Link copied'); } catch { toast.error('Copy failed'); }
     }
   }, [property]);
 
@@ -282,22 +330,16 @@ export default function PublicPropertyPage() {
       } else {
         await supabase.from('saved_properties').insert([{ renter_id: user.id, property_id: property.id }]);
         setIsSaved(true);
-        toast.success('Property saved!');
+        toast.success('Saved');
       }
     } catch { toast.error('Failed to save'); }
     finally { setIsSaving(false); }
   }, [user, property, isSaved, router]);
 
-  const handleReported = useCallback((reason: ReportReason) => {
-    if (reason === 'already_taken' && property) {
-      setProperty({ ...property, status: 'taken' });
-    }
-  }, [property]);
-
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="h-12 w-12 animate-spin text-primary-600" />
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
       </div>
     );
   }
@@ -307,21 +349,25 @@ export default function PublicPropertyPage() {
       <div className="min-h-screen flex items-center justify-center p-4">
         <Card className="max-w-md w-full">
           <CardContent className="p-8 text-center">
-            <AlertCircle className="h-8 w-8 text-red-600 mx-auto mb-4" />
-            <h2 className="text-2xl font-bold mb-2">Property Not Found</h2>
-            <p className="text-gray-600 mb-6">{error || 'This property is not available.'}</p>
-            <Button asChild><Link href="/"><ArrowLeft className="mr-2 h-4 w-4" />Back to Home</Link></Button>
+            <AlertCircle className="h-8 w-8 text-destructive mx-auto mb-4" />
+            <h2 className="text-2xl font-bold mb-2">Not found</h2>
+            <p className="text-muted-foreground mb-6">{error || 'This listing is not available.'}</p>
+            <Button asChild><Link href="/"><ArrowLeft className="mr-2 h-4 w-4" />Home</Link></Button>
           </CardContent>
         </Card>
       </div>
     );
   }
 
+  const intent = inferListingIntent(property);
+  const category = inferAssetCategory(property);
+  const period = property.price_period || (intent === 'sale' ? 'once' : 'month');
+
   return (
-    <main className="min-h-screen bg-gray-50 dark:bg-gray-950">
-      <div className="sticky top-0 z-20 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm border-b">
+    <main className="min-h-screen bg-muted/30">
+      <div className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b">
         <div className="container mx-auto px-4 py-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <Breadcrumb property={property} />
+          <Breadcrumb title={property.title} />
           <div className="flex gap-2">
             <Button variant="ghost" size="sm" onClick={handleShare}><Share2 className="h-4 w-4 mr-2" />Share</Button>
             <Button variant="ghost" size="sm" onClick={handleSave} disabled={isSaving}>
@@ -338,26 +384,31 @@ export default function PublicPropertyPage() {
             <Card className="overflow-hidden">
               <CardContent className="p-3 md:p-4">
                 <div
-                  className="relative h-64 sm:h-80 md:h-96 lg:h-[500px] mb-4 bg-gray-100 rounded-lg overflow-hidden cursor-pointer group"
+                  className="relative h-64 sm:h-80 md:h-96 lg:h-[500px] mb-4 bg-muted rounded-lg overflow-hidden cursor-pointer"
                   onClick={() => photoUrls.length > 0 && setIsLightboxOpen(true)}
                 >
                   {photoUrls.length > 0 ? (
                     <Image src={photoUrls[selectedImage] || photoUrls[0]} alt={property.title} fill className="object-cover" priority />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center"><Home className="h-16 w-16 text-gray-400" /></div>
+                    <div className="w-full h-full flex items-center justify-center"><Home className="h-16 w-16 text-muted-foreground" /></div>
                   )}
                   <div className="absolute top-3 left-3 flex gap-2 flex-wrap">
-                    {property.landlord?.is_verified && <Badge className="bg-emerald-500 text-white border-0"><CheckCircle className="h-3 w-3 mr-1" />Verified</Badge>}
+                    {property.landlord?.is_verified && (
+                      <Badge className="bg-emerald-600 text-white border-0"><CheckCircle className="h-3 w-3 mr-1" />Verified</Badge>
+                    )}
                     <TenureBadge tenure={property.tenure_type} size="md" />
-                    {property.status === 'active' && <Badge className="bg-primary-600 text-white border-0">Available Now</Badge>}
-                    {(property.status === 'rented' || property.status === 'taken') && <Badge className="bg-gray-500 text-white border-0">Taken</Badge>}
-                    {property.is_featured && <Badge className="bg-amber-500 text-white border-0">Featured</Badge>}
+                    <Badge variant="secondary">{ASSET_CATEGORY_LABELS[category]}</Badge>
+                    {property.status === 'active' && <Badge className="bg-primary text-primary-foreground border-0">Available</Badge>}
+                    {(property.status === 'rented' || property.status === 'taken') && <Badge variant="secondary">Taken</Badge>}
                   </div>
                 </div>
                 {photoUrls.length > 1 && (
                   <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
                     {photoUrls.slice(0, 8).map((photo, index) => (
-                      <button key={index} onClick={() => setSelectedImage(index)} className={`relative h-16 sm:h-20 rounded-lg overflow-hidden border-2 ${selectedImage === index ? 'border-primary-600' : 'border-transparent'}`}>
+                      <button key={index} type="button" onClick={() => setSelectedImage(index)}
+                        className={`relative h-16 sm:h-20 rounded-lg overflow-hidden border-2 ${
+                          selectedImage === index ? 'border-primary' : 'border-transparent'
+                        }`}>
                         <Image src={photo} alt="" fill className="object-cover" />
                       </button>
                     ))}
@@ -371,32 +422,81 @@ export default function PublicPropertyPage() {
                 <div className="flex flex-col md:flex-row justify-between gap-4 mb-6">
                   <div>
                     <h1 className="text-2xl sm:text-3xl font-bold mb-2">{property.title}</h1>
-                    <div className="flex items-center text-gray-500"><MapPin className="h-5 w-5 mr-1" />{property.location_suburb}, {property.location_city}</div>
+                    <div className="flex items-center text-muted-foreground">
+                      <MapPin className="h-5 w-5 mr-1" />
+                      {property.location_suburb}, {property.location_city}
+                    </div>
+                    <div className="flex gap-2 mt-2 flex-wrap">
+                      <Badge variant="outline">{LISTING_INTENT_LABELS[intent]}</Badge>
+                      <Badge variant="outline">{subtypeLabel(property.property_subtype || property.property_type)}</Badge>
+                    </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-2xl sm:text-3xl font-bold text-primary-600">E{property.price.toLocaleString()}</div>
-                    <div className="text-sm text-gray-500">per month</div>
+                    <div className="text-2xl sm:text-3xl font-bold text-primary">
+                      E{property.price.toLocaleString()}
+                      <span className="text-sm font-normal text-muted-foreground">{formatPricePeriod(period)}</span>
+                    </div>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-                  <div className="text-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg"><Bed className="h-5 w-5 mx-auto mb-1 text-primary-600" /><div className="font-semibold">{property.bedrooms || 'N/A'}</div><div className="text-sm text-gray-500">Bedrooms</div></div>
-                  <div className="text-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg"><Bath className="h-5 w-5 mx-auto mb-1 text-primary-600" /><div className="font-semibold">{property.bathrooms || 'N/A'}</div><div className="text-sm text-gray-500">Bathrooms</div></div>
-                  <div className="text-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg"><Home className="h-5 w-5 mx-auto mb-1 text-primary-600" /><div className="font-semibold capitalize">{property.property_type}</div><div className="text-sm text-gray-500">Type</div></div>
-                  <div className="text-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg"><Calendar className="h-5 w-5 mx-auto mb-1 text-primary-600" /><div className="font-semibold">{new Date(property.created_at).toLocaleDateString()}</div><div className="text-sm text-gray-500">Listed</div></div>
-                </div>
+
+                <SpecsGrid property={property} />
+
+                {category === 'land' && (
+                  <div className="grid sm:grid-cols-2 gap-2 mb-6 text-sm">
+                    {property.has_road_access != null && <div>Road access: <strong>{property.has_road_access ? 'Yes' : 'No'}</strong></div>}
+                    {property.has_water != null && <div>Water: <strong>{property.has_water ? 'Yes' : 'No'}</strong></div>}
+                    {property.has_electricity != null && <div>Electricity: <strong>{property.has_electricity ? 'Yes' : 'No'}</strong></div>}
+                    {property.has_sewer != null && <div>Sewer: <strong>{property.has_sewer ? 'Yes' : 'No'}</strong></div>}
+                    {property.zoning_notes && <div className="sm:col-span-2">Notes: {property.zoning_notes}</div>}
+                  </div>
+                )}
+
+                {category === 'commercial' && (
+                  <div className="grid sm:grid-cols-2 gap-2 mb-6 text-sm">
+                    {property.floors != null && <div>Floors: <strong>{property.floors}</strong></div>}
+                    {property.has_loading_bay != null && <div>Loading bay: <strong>{property.has_loading_bay ? 'Yes' : 'No'}</strong></div>}
+                    {property.has_street_frontage != null && <div>Street frontage: <strong>{property.has_street_frontage ? 'Yes' : 'No'}</strong></div>}
+                    {property.power_notes && <div className="sm:col-span-2">Power: {property.power_notes}</div>}
+                  </div>
+                )}
+
                 <Tabs defaultValue="description">
-                  <TabsList className="w-full grid grid-cols-3 mb-4"><TabsTrigger value="description">Description</TabsTrigger><TabsTrigger value="features">Features</TabsTrigger><TabsTrigger value="nearby">Nearby</TabsTrigger></TabsList>
-                  <TabsContent value="description"><p className="text-gray-600 whitespace-pre-line">{property.description || 'No description.'}</p></TabsContent>
+                  <TabsList className="w-full grid grid-cols-3 mb-4">
+                    <TabsTrigger value="description">Description</TabsTrigger>
+                    <TabsTrigger value="features">Features</TabsTrigger>
+                    <TabsTrigger value="nearby">Location</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="description">
+                    <p className="text-muted-foreground whitespace-pre-line">{property.description || 'No description.'}</p>
+                    {property.lease_terms && (
+                      <div className="mt-4 p-3 bg-muted rounded-lg text-sm">
+                        <strong>Lease terms:</strong> {property.lease_terms}
+                      </div>
+                    )}
+                  </TabsContent>
                   <TabsContent value="features">
                     <div className="grid sm:grid-cols-2 gap-3">
                       {property.amenities?.length ? property.amenities.map((a, i) => (
-                        <div key={i} className="flex items-center gap-2"><CheckCircle className="h-4 w-4 text-emerald-500" /><span>{a}</span></div>
-                      )) : <p className="text-gray-500">No amenities listed.</p>}
+                        <div key={i} className="flex items-center gap-2">
+                          <CheckCircle className="h-4 w-4 text-emerald-500" /><span>{a}</span>
+                        </div>
+                      )) : <p className="text-muted-foreground">No features listed.</p>}
+                      {property.is_furnished && category === 'residential' && (
+                        <div className="flex items-center gap-2"><CheckCircle className="h-4 w-4 text-emerald-500" /><span>Furnished</span></div>
+                      )}
                     </div>
                   </TabsContent>
                   <TabsContent value="nearby">
-                    <p className="text-gray-500 mb-3">Nearby points of interest coming soon.</p>
-                    <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg"><MapPin className="h-5 w-5 text-gray-400" /><div><div className="font-medium">{property.location_city}</div><div className="text-sm text-gray-500">{property.location_suburb}</div></div></div>
+                    <div className="flex items-center gap-3 p-3 bg-muted rounded-lg">
+                      <MapPin className="h-5 w-5 text-muted-foreground" />
+                      <div>
+                        <div className="font-medium">{property.location_city}</div>
+                        <div className="text-sm text-muted-foreground">{property.location_suburb}</div>
+                        {property.location_address && (
+                          <div className="text-sm text-muted-foreground">{property.location_address}</div>
+                        )}
+                      </div>
+                    </div>
                   </TabsContent>
                 </Tabs>
               </CardContent>
@@ -407,35 +507,48 @@ export default function PublicPropertyPage() {
             <div className="sticky top-20 space-y-6">
               <Card>
                 <CardContent className="p-4 md:p-6">
-                  <h2 className="text-xl font-semibold mb-4">Contact Landlord</h2>
+                  <h2 className="text-xl font-semibold mb-4">Contact</h2>
                   <div className="flex items-center gap-3 mb-4">
-                    <div className="w-12 h-12 bg-primary-100 rounded-full flex items-center justify-center"><Home className="h-6 w-6 text-primary-600" /></div>
+                    <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center">
+                      <Home className="h-6 w-6 text-primary" />
+                    </div>
                     <div>
-                      <div className="font-semibold">{property.landlord?.full_name || 'Property Owner'}</div>
-                      {property.landlord?.is_verified && <div className="flex items-center text-sm text-gray-500"><CheckCircle className="h-3 w-3 text-emerald-500 mr-1" />Verified</div>}
+                      <div className="font-semibold">{property.landlord?.full_name || 'Owner'}</div>
+                      {property.landlord?.is_verified && (
+                        <div className="flex items-center text-sm text-muted-foreground">
+                          <CheckCircle className="h-3 w-3 text-emerald-500 mr-1" />Verified
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div className="space-y-3">
-                    <Button className="w-full h-12 bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => handleContact('whatsapp')}><MessageCircle className="mr-2 h-5 w-5" />WhatsApp</Button>
-                    <Button variant="outline" className="w-full h-12" onClick={() => handleContact('phone')}><Phone className="mr-2 h-5 w-5" />Call {displayPhone}</Button>
-                    <Button variant="outline" className="w-full h-12" onClick={() => handleContact('email')}><Mail className="mr-2 h-5 w-5" />Send Email</Button>
+                    <Button className="w-full h-12 bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => handleContact('whatsapp')}>
+                      <MessageCircle className="mr-2 h-5 w-5" />WhatsApp
+                    </Button>
+                    <Button variant="outline" className="w-full h-12" onClick={() => handleContact('phone')}>
+                      <Phone className="mr-2 h-5 w-5" />Call {displayPhone}
+                    </Button>
+                    <Button variant="outline" className="w-full h-12" onClick={() => handleContact('email')}>
+                      <Mail className="mr-2 h-5 w-5" />Email
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
 
               <Card>
                 <CardContent className="p-4 md:p-6">
-                  <h3 className="font-semibold mb-3">Listing Details</h3>
+                  <h3 className="font-semibold mb-3">Listing details</h3>
                   <div className="space-y-2 text-sm">
-                    <div className="flex justify-between"><span className="text-gray-500">Status:</span><span className="capitalize">{property.status}</span></div>
-                    <div className="flex justify-between items-center"><span className="text-gray-500">Tenure:</span><TenureBadge tenure={property.tenure_type} /></div>
-                    <div className="flex justify-between"><span className="text-gray-500">Views:</span><span>{property.views || 0}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Status</span><span className="capitalize">{property.status}</span></div>
+                    <div className="flex justify-between items-center"><span className="text-muted-foreground">Tenure</span><TenureBadge tenure={property.tenure_type} /></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Category</span><span>{ASSET_CATEGORY_LABELS[category]}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Views</span><span>{property.views || 0}</span></div>
                   </div>
                   <div className="border-t my-4" />
-                  <div className="bg-amber-50 dark:bg-amber-950/30 p-3 rounded-lg text-sm border border-amber-200">
-                    <p className="text-amber-800 font-medium mb-1">Safety Tips</p>
-                    <p className="text-amber-700 text-xs">• View in person before paying<br />• Never send money via mobile transfer<br />• Report suspicious listings</p>
-                    <Button variant="link" className="text-xs p-0 h-auto mt-2 text-amber-600" onClick={() => setReportOpen(true)}>
+                  <div className="bg-amber-500/10 p-3 rounded-lg text-sm border border-amber-500/20">
+                    <p className="font-medium mb-1 text-amber-900 dark:text-amber-200">Safety tips</p>
+                    <p className="text-xs text-amber-800 dark:text-amber-300">View in person before paying. Never send money via mobile transfer first.</p>
+                    <Button variant="link" className="text-xs p-0 h-auto mt-2" onClick={() => setReportOpen(true)}>
                       Report this listing
                     </Button>
                   </div>
@@ -445,19 +558,19 @@ export default function PublicPropertyPage() {
               {similarProperties.length > 0 && (
                 <Card>
                   <CardContent className="p-4 md:p-6">
-                    <h3 className="font-semibold mb-3">Similar Properties</h3>
+                    <h3 className="font-semibold mb-3">Similar listings</h3>
                     <div className="space-y-3">
                       {similarProperties.map((s) => {
                         const photo = getPrimaryPhoto(s.photos);
                         return (
-                          <Link key={s.id} href={`/properties/${s.id}`} className="flex gap-3 p-2 hover:bg-gray-50 rounded-lg">
-                            <div className="w-16 h-16 bg-gray-200 rounded-lg overflow-hidden relative shrink-0">
-                              {photo ? <Image src={photo.photo_url} alt="" fill className="object-cover" /> : <Home className="h-6 w-6 m-auto text-gray-400" />}
+                          <Link key={s.id} href={`/properties/${s.id}`} className="flex gap-3 p-2 hover:bg-muted rounded-lg">
+                            <div className="w-16 h-16 bg-muted rounded-lg overflow-hidden relative shrink-0">
+                              {photo ? <Image src={photo.photo_url} alt="" fill className="object-cover" /> : <Home className="h-6 w-6 m-auto text-muted-foreground" />}
                             </div>
                             <div className="min-w-0">
                               <div className="font-medium text-sm truncate">{s.title}</div>
-                              <div className="text-xs text-gray-500">{s.location_suburb}</div>
-                              <div className="text-sm font-semibold text-primary-600">E{s.price}/mo</div>
+                              <div className="text-xs text-muted-foreground">{s.location_suburb}</div>
+                              <div className="text-sm font-semibold text-primary">E{s.price.toLocaleString()}</div>
                             </div>
                           </Link>
                         );
@@ -480,7 +593,9 @@ export default function PublicPropertyPage() {
         propertyTitle={property.title}
         open={reportOpen}
         onOpenChange={setReportOpen}
-        onReported={handleReported}
+        onReported={(reason: ReportReason) => {
+          if (reason === 'already_taken') setProperty({ ...property, status: 'taken' });
+        }}
       />
     </main>
   );
