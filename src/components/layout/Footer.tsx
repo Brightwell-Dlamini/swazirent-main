@@ -12,6 +12,17 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
+const CITY_LINKS = [
+  { name: 'Mbabane', href: '/in/mbabane' },
+  { name: 'Manzini', href: '/in/manzini' },
+  { name: 'Matsapha', href: '/in/matsapha' },
+  { name: 'Ezulwini', href: '/in/ezulwini' },
+  { name: 'Lobamba', href: '/in/lobamba' },
+  { name: 'Nhlangano', href: '/in/nhlangano' },
+  { name: "Piggs Peak", href: '/in/piggs-peak' },
+  { name: 'Siteki', href: '/in/siteki' },
+];
+
 export function Footer() {
   const pathname = usePathname();
   const [email, setEmail] = useState('');
@@ -39,23 +50,21 @@ export function Footer() {
     company: [
       { name: 'About Us', href: '/about' },
       { name: 'Contact', href: '/contact' },
-      { name: 'Careers', href: '/careers' },
       { name: 'Blog', href: '/blog' },
+      { name: 'FAQs', href: '/faqs' },
     ],
     renters: [
       { name: 'Search Properties', href: '/search' },
       { name: 'Map', href: '/map' },
       { name: 'Saved Properties', href: '/dashboard/renter' },
-      { name: 'FAQs', href: '/faqs' },
+      { name: 'Newsletter', href: '/newsletter' },
     ],
     landlords: [
       { name: 'List a Property', href: '/dashboard/landlord/add-property' },
       { name: 'Manage Listings', href: '/dashboard/landlord' },
-      { name: 'Pricing', href: '/pricing' },
     ],
     support: [
-      { name: 'Help Center', href: '/help' },
-      { name: 'Newsletter', href: '/newsletter' },
+      { name: 'Help / Contact', href: '/contact' },
       { name: 'Privacy Policy', href: '/privacy' },
       { name: 'Terms', href: '/terms' },
     ],
@@ -98,7 +107,6 @@ export function Footer() {
   return (
     <footer className="bg-muted/40 dark:bg-gray-950 border-t border-border text-foreground">
       <div className="container mx-auto px-4 py-10 md:py-14">
-        {/* Brand */}
         <div className="mb-8 max-w-md">
           <Link href="/" className="flex items-center gap-2 mb-3 hover:opacity-80 transition-opacity">
             <Home className="h-5 w-5 text-primary" />
@@ -123,12 +131,6 @@ export function Footer() {
           </div>
         </div>
 
-        {/*
-          Mobile: 2 columns × 2 rows
-          Company | For Seekers
-          For Landlords | Support
-          Desktop: 4 columns
-        */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-8">
           <LinkCol title="Company" links={footerLinks.company} />
           <LinkCol title="For Seekers" links={footerLinks.renters} />
@@ -136,7 +138,22 @@ export function Footer() {
           <LinkCol title="Support" links={footerLinks.support} />
         </div>
 
-        {/* Newsletter */}
+        {/* City SEO internal links */}
+        <div className="mt-10 pt-8 border-t border-border">
+          <h4 className="font-semibold text-sm mb-3">Properties by city</h4>
+          <div className="flex flex-wrap gap-2">
+            {CITY_LINKS.map((c) => (
+              <Link
+                key={c.href}
+                href={c.href}
+                className="text-xs sm:text-sm px-3 py-1.5 rounded-full border border-border bg-background hover:border-primary/40 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {c.name}
+              </Link>
+            ))}
+          </div>
+        </div>
+
         <div className="mt-10 pt-8 border-t border-border">
           <div className="grid md:grid-cols-2 gap-4 items-center">
             <div>
@@ -162,7 +179,6 @@ export function Footer() {
           </div>
         </div>
 
-        {/* Trust */}
         <div className="mt-8 pt-6 border-t border-border">
           <div className="flex flex-wrap justify-center gap-5 text-muted-foreground">
             <div className="flex items-center gap-1.5 text-xs">
@@ -181,7 +197,6 @@ export function Footer() {
         </div>
       </div>
 
-      {/* Bottom: social first, then copyright */}
       <div className="border-t border-border bg-muted/60 dark:bg-black/40">
         <div className="container mx-auto px-4 py-5">
           <div className="flex flex-col items-center gap-4">
@@ -202,7 +217,6 @@ export function Footer() {
               <div className="flex gap-3">
                 <Link href="/privacy" className="hover:text-foreground">Privacy</Link>
                 <Link href="/terms" className="hover:text-foreground">Terms</Link>
-                <Link href="/cookies" className="hover:text-foreground">Cookies</Link>
               </div>
             </div>
           </div>
