@@ -1,20 +1,17 @@
 -- =============================================================================
--- FIX: "Database error saving new user" on signup + landlord first-class
--- Date: 2026-07-26
+-- FIX: signup roles + landlord first-class
 -- Run in Supabase → SQL Editor (safe to re-run).
 -- =============================================================================
 
 DO $$
-DECLARE
-  r record;
+DECLARE r record;
 BEGIN
   FOR r IN
     SELECT c.conname
     FROM pg_constraint c
     JOIN pg_class t ON c.conrelid = t.oid
     JOIN pg_namespace n ON t.relnamespace = n.oid
-    WHERE n.nspname = 'public'
-      AND t.relname = 'profiles'
+    WHERE n.nspname = 'public' AND t.relname = 'profiles'
       AND c.contype = 'c'
       AND pg_get_constraintdef(c.oid) ILIKE '%user_type%'
   LOOP
@@ -28,14 +25,10 @@ ALTER TABLE public.profiles
   ADD CONSTRAINT profiles_user_type_check
   CHECK (
     user_type IS NULL
-    OR user_type IN (
-      'seeker', 'landlord', 'broker', 'agent', 'admin',
-      'renter'  -- legacy only
-    )
+    OR user_type IN ('seeker', 'landlord', 'broker', 'agent', 'admin', 'renter')
   );
 
-ALTER TABLE public.profiles
-  ALTER COLUMN user_type SET DEFAULT 'seeker';
+ALTER TABLE public.profiles ALTER COLUMN user_type SET DEFAULT 'seeker';
 
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger
@@ -63,9 +56,7 @@ BEGIN
     canonical := 'seeker';
   END IF;
 
-  INSERT INTO public.profiles (
-    id, email, full_name, phone, user_type, is_verified, created_at, updated_at
-  )
+  INSERT INTO public.profiles (id, email, full_name, phone, user_type, is_verified, created_at, updated_at)
   VALUES (
     new.id,
     new.email,
@@ -97,8 +88,4 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_new_user();
 
--- Do NOT auto-rewrite landlord → broker; landlord is first-class.
 UPDATE public.profiles SET user_type = 'seeker' WHERE user_type = 'renter';
-
-COMMENT ON COLUMN public.profiles.user_type IS
-  'seeker | landlord | broker | agent | admin (legacy renter accepted)';
