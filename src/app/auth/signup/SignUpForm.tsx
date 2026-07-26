@@ -33,7 +33,7 @@ const signUpSchema = z
     fullName: z.string().min(2, 'Full name is required'),
     phone: z
       .string()
-      .min(10, 'Phone number must be at least 10 digits')
+      .min(8, 'Phone number is required')
       .regex(/^(\+268)?[0-9\s\-]+$/, 'Please enter a valid Eswatini phone number'),
     userType: z.enum(ROLES),
     agreeToTerms: z.boolean().refine((val) => val === true, {
@@ -59,20 +59,19 @@ const formatEswatiniPhone = (value: string): string => {
   return value;
 };
 
+type FormRole = (typeof ROLES)[number];
+
 type FormDataType = {
   email: string;
   password: string;
   confirmPassword: string;
   fullName: string;
   phone: string;
-  userType: (typeof ROLES)[number];
+  userType: FormRole;
   agreeToTerms: boolean;
 };
 
-const ROLE_META: Record<
-  (typeof ROLES)[number],
-  { label: string; icon: typeof User; blurb: string }
-> = {
+const ROLE_META: Record<FormRole, { label: string; icon: typeof User; blurb: string }> = {
   seeker: { label: 'Seeker', icon: User, blurb: 'Looking for a place to rent or buy.' },
   landlord: { label: 'Landlord', icon: Home, blurb: 'Property owner listing your own place.' },
   broker: { label: 'Broker', icon: Building, blurb: 'Facilitator finding tenants or buyers.' },
@@ -90,7 +89,7 @@ export default function SignUpForm() {
   const [isMounted, setIsMounted] = useState(false);
 
   const initialTypeParam = searchParams.get('type');
-  const initialUserType: FormDataType['userType'] =
+  const initialUserType: FormRole =
     initialTypeParam === 'landlord'
       ? 'landlord'
       : initialTypeParam === 'broker'
@@ -154,15 +153,14 @@ export default function SignUpForm() {
       );
       if (signUpError) {
         setError(signUpError.message);
-        setIsLoading(false);
         return;
       }
       setSuccessState({
         type: 'verification',
         message: 'Please check your email to verify your account.',
       });
-    } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : 'An error occurred during signup');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'An error occurred during signup');
     } finally {
       setIsLoading(false);
     }
@@ -215,10 +213,7 @@ export default function SignUpForm() {
           </CardHeader>
           <CardContent>
             <div className="space-y-6">
-              <SocialLoginButtons
-                isLoading={isLoading || authLoading}
-                onError={setError}
-              />
+              <SocialLoginButtons isLoading={isLoading || authLoading} onError={setError} />
               <form onSubmit={handleSubmit} className="space-y-4">
                 {error && (
                   <Alert variant="destructive">
