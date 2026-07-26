@@ -10,6 +10,8 @@ import { Footer } from '@/components/layout/Footer';
 import { BackToTop } from '@/components/ui/BackToTop';
 import { PhoneBanner } from '@/components/auth/PhoneBanner';
 import { OfflineBanner } from '@/components/OfflineBanner';
+import { RegisterSW } from '@/components/pwa/RegisterSW';
+import { InstallPrompt } from '@/components/pwa/InstallPrompt';
 import { Toaster } from 'sonner';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Providers } from './providers';
@@ -20,7 +22,10 @@ const inter = Inter({
   variable: '--font-sans',
 });
 
+const SITE = process.env.NEXT_PUBLIC_SITE_URL || 'https://eswaproperty.vercel.app';
+
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE),
   title: {
     default: 'Ekhaya — Homes in Eswatini',
     template: '%s · Ekhaya',
@@ -36,6 +41,15 @@ export const metadata: Metadata = {
     'Ekhaya',
   ],
   authors: [{ name: 'Ekhaya' }],
+  manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'Ekhaya',
+  },
+  formatDetection: {
+    telephone: true,
+  },
   openGraph: {
     type: 'website',
     locale: 'en_SZ',
@@ -49,16 +63,24 @@ export const metadata: Metadata = {
     description: 'Verified homes, land, and commercial listings across Eswatini.',
   },
   robots: { index: true, follow: true },
+  icons: {
+    icon: [
+      { url: '/icons/icon.svg', type: 'image/svg+xml' },
+      { url: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+    ],
+    apple: [{ url: '/icons/icon-192.png', sizes: '192x192' }],
+  },
 };
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
+    { media: '(prefers-color-scheme: light)', color: '#4f46e5' },
     { media: '(prefers-color-scheme: dark)', color: '#0f172a' },
   ],
   width: 'device-width',
   initialScale: 1,
   maximumScale: 5,
+  viewportFit: 'cover',
 };
 
 export default function RootLayout({
@@ -79,6 +101,7 @@ export default function RootLayout({
           <AuthProvider>
             <Providers>
               <ErrorBoundary>
+                <RegisterSW />
                 <Header />
                 <OfflineBanner />
                 <PhoneBanner />
@@ -87,6 +110,7 @@ export default function RootLayout({
                 </div>
                 <Footer />
                 <BackToTop />
+                <InstallPrompt />
                 <Toaster
                   position="top-center"
                   richColors

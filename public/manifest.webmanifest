@@ -1,0 +1,60 @@
+{
+  "name": "Ekhaya — Homes in Eswatini",
+  "short_name": "Ekhaya",
+  "description": "Find verified homes, land, and commercial space across Eswatini.",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0f172a",
+  "theme_color": "#4f46e5",
+  "lang": "en-SZ",
+  "dir": "ltr",
+  "categories": ["lifestyle", "business", "productivity"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Search",
+      "short_name": "Search",
+      "url": "/search?source=pwa",
+      "description": "Search listings"
+    },
+    {
+      "name": "Map",
+      "short_name": "Map",
+      "url": "/map?source=pwa",
+      "description": "Map discovery"
+    },
+    {
+      "name": "List property",
+      "short_name": "List",
+      "url": "/dashboard/landlord/add-property?source=pwa",
+      "description": "Add a listing"
+    }
+  ]
+}
