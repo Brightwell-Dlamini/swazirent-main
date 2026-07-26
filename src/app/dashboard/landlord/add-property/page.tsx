@@ -1,20 +1,36 @@
 // src/app/dashboard/landlord/add-property/page.tsx
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { useVerification } from '@/hooks/useVerification';
 import { usePhoneVerification } from '@/hooks/usePhoneVerification';
 import { supabase } from '@/lib/supabase';
-import { PropertyType, TenureType, TENURE_CONFIG } from '@/types/property';
+import {
+  AssetCategory,
+  ListingIntent,
+  TenureType,
+  TENURE_CONFIG,
+  RESIDENTIAL_SUBTYPE_LABELS,
+  LAND_SUBTYPE_LABELS,
+  LISTING_INTENT_LABELS,
+  ASSET_CATEGORY_LABELS,
+  defaultPricePeriod,
+  subtypeToLegacyPropertyType,
+  ResidentialSubtype,
+  LandSubtype,
+} from '@/types/property';
 import { canPostListings, normalizeUserType } from '@/types/user';
 import {
   ESWATINI_CITIES,
-  PROPERTY_TYPES,
   TENURE_TYPES,
-  ESWATINI_AMENITIES,
+  RESIDENTIAL_SUBTYPES,
+  LAND_SUBTYPES,
+  RESIDENTIAL_AMENITIES,
+  LAND_AMENITIES,
   ROOM_OPTIONS,
   BATH_OPTIONS,
   MAX_PHOTOS,
@@ -34,6 +50,8 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
 import {
   ChevronLeft,
@@ -47,18 +65,20 @@ import {
   Clock,
   Shield,
   Smartphone,
+  Home,
+  Map,
 } from 'lucide-react';
-import Link from 'next/link';
-import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import { TenureBadge } from '@/components/properties/TenureBadge';
 import { PhoneVerifyDialog } from '@/components/auth/PhoneVerifyDialog';
+
+const TOTAL_STEPS = 5;
 
 export default function AddPropertyPage() {
   const { user, userType, isLoading: authLoading } = useAuth();
   const { isLandlordVerified, isLandlordPending, refreshVerification } = useVerification();
   const { isPhoneVerified, refresh: refreshPhone } = usePhoneVerification();
   const router = useRouter();
+
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
@@ -71,24 +91,36 @@ export default function AddPropertyPage() {
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
 
   const [formData, setFormData] = useState({
+    asset_category: '' as AssetCategory | '',
+    listing_intent: '' as ListingIntent | '',
+    property_subtype: '',
     title: '',
     description: '',
-    property_type: '' as PropertyType | '',
     tenure_type: 'unsure' as TenureType,
     price: '',
     city: '',
     suburb: '',
     address: '',
-    bedrooms: '0',
-    bathrooms: '0',
+    // residential
+    bedrooms: '1',
+    bathrooms: '1',
     is_furnished: false,
+    // land
+    land_size_ha: '',
+    is_fenced: false,
+    has_road_access: false,
+    has_water: false,
+    has_electricity: false,
+    has_sewer: false,
+    zoning_notes: '',
     amenities: [] as string[],
     lease_terms: '',
     contact_whatsapp: '',
     contact_phone: '',
   });
 
-  const totalSteps = 4;
+  const isLand = formData.asset_category === 'land';
+  const isResidential = formData.asset_category === 'residential';
 
   useEffect(() => {
     if (authLoading) return;
@@ -113,8 +145,23 @@ export default function AddPropertyPage() {
   }, [user, userType, isLandlordPending, refreshVerification]);
 
   const handleNext = useCallback(() => {
-    if (currentStep < totalSteps) setCurrentStep((p) => p + 1);
-  }, [currentStep]);
+    if (currentStep === 1) {
+      if (!formData.asset_category) {
+        setError('Please choose what you are listing');
+        return;
+      }
+      if (!formData.listing_intent) {
+        setError('Please choose how it is offered');
+        return;
+      }
+      if (!formData.property_subtype) {
+        setError('Please select a subtype');
+        return;
+      }
+      setError(null);
+    }
+    if (currentStep < TOTAL_STEPS) setCurrentStep((p) => p + 1);
+  }, [currentStep, formData.asset_category, formData.listing_intent, formData.property_subtype]);
 
   const handlePrevious = useCallback(() => {
     if (currentStep > 1) setCurrentStep((p) => p - 1);
@@ -129,39 +176,71 @@ export default function AddPropertyPage() {
     }));
   }, []);
 
-  const handlePhotoUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    if (photos.length + files.length > MAX_PHOTOS) {
-      toast.error(`Maximum ${MAX_PHOTOS} photos allowed`);
-      return;
-    }
-    setPhotos((prev) => [...prev, ...files]);
-    setPhotoPreviews((prev) => [...prev, ...files.map((f) => URL.createObjectURL(f))]);
-  }, [photos.length]);
+  const handlePhotoUpload = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files || []);
+      if (photos.length + files.length > MAX_PHOTOS) {
+        toast.error(`Maximum ${MAX_PHOTOS} photos allowed`);
+        return;
+      }
+      setPhotos((prev) => [...prev, ...files]);
+      setPhotoPreviews((prev) => [...prev, ...files.map((f) => URL.createObjectURL(f))]);
+    },
+    [photos.length]
+  );
 
-  const removePhoto = useCallback((index: number) => {
-    setPhotos((prev) => prev.filter((_, i) => i !== index));
-    URL.revokeObjectURL(photoPreviews[index]);
-    setPhotoPreviews((prev) => prev.filter((_, i) => i !== index));
-  }, [photoPreviews]);
+  const removePhoto = useCallback(
+    (index: number) => {
+      setPhotos((prev) => prev.filter((_, i) => i !== index));
+      URL.revokeObjectURL(photoPreviews[index]);
+      setPhotoPreviews((prev) => prev.filter((_, i) => i !== index));
+    },
+    [photoPreviews]
+  );
 
-  const handlePhoneChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData((prev) => ({ ...prev, contact_phone: e.target.value.replace(/[^\d+]/g, '') }));
-  }, []);
+  const setCategory = (cat: AssetCategory) => {
+    setFormData((p) => ({
+      ...p,
+      asset_category: cat,
+      property_subtype: '',
+      amenities: [],
+      bedrooms: cat === 'residential' ? p.bedrooms || '1' : '0',
+      bathrooms: cat === 'residential' ? p.bathrooms || '1' : '0',
+      is_furnished: cat === 'residential' ? p.is_furnished : false,
+    }));
+  };
+
+  const setIntent = (intent: ListingIntent) => {
+    setFormData((p) => ({ ...p, listing_intent: intent }));
+  };
 
   const validateForm = useCallback((): { valid: boolean; errors: string[] } => {
     const errors: string[] = [];
-    if (!formData.title.trim()) errors.push('Please enter a listing title');
-    if (!formData.description.trim()) errors.push('Please enter a description');
-    if (!formData.property_type) errors.push('Please select a property type');
-    if (!formData.tenure_type) errors.push('Please select land tenure');
+    if (!formData.asset_category) errors.push('Select asset category');
+    if (!formData.listing_intent) errors.push('Select listing intent');
+    if (!formData.property_subtype) errors.push('Select subtype');
+    if (!formData.title.trim()) errors.push('Enter a listing title');
+    if (!formData.description.trim()) errors.push('Enter a description');
+    if (!formData.tenure_type) errors.push('Select land tenure');
     const price = parseFloat(formData.price);
-    if (!formData.price || isNaN(price) || price <= 0) errors.push('Please enter a valid price greater than 0');
-    if (!formData.city) errors.push('Please select a city in Eswatini');
-    if (!formData.suburb.trim()) errors.push('Please enter a suburb');
-    if (!formData.contact_phone.trim()) errors.push('Please enter a contact phone number');
+    if (!formData.price || isNaN(price) || price <= 0) errors.push('Enter a valid price');
+    if (!formData.city) errors.push('Select a city');
+    if (!formData.suburb.trim()) errors.push('Enter a suburb');
+    if (!formData.contact_phone.trim()) errors.push('Enter a contact phone');
     else if (!isValidEswatiniPhone(formData.contact_phone))
-      errors.push('Please enter a valid Eswatini phone number (e.g., +268 7600 0000)');
+      errors.push('Enter a valid Eswatini phone (e.g. +268 7600 0000)');
+
+    if (formData.asset_category === 'land') {
+      const ha = parseFloat(formData.land_size_ha);
+      if (!formData.land_size_ha || isNaN(ha) || ha <= 0)
+        errors.push('Enter land size in hectares');
+    }
+
+    if (formData.asset_category === 'residential') {
+      if (formData.bedrooms === '' || formData.bathrooms === '')
+        errors.push('Select bedrooms and bathrooms');
+    }
+
     return { valid: errors.length === 0, errors };
   }, [formData]);
 
@@ -173,9 +252,13 @@ export default function AddPropertyPage() {
       const fileExt = photo.name.split('.').pop() || 'jpg';
       const fileName = `${user!.id}/${propertyId}/${Date.now()}-${i}.${fileExt}`;
       setUploadProgress({ current: i + 1, total: photos.length });
-      const { error: uploadError } = await supabase.storage.from('property-photos').upload(fileName, photo);
+      const { error: uploadError } = await supabase.storage
+        .from('property-photos')
+        .upload(fileName, photo);
       if (uploadError) throw new Error(`Failed to upload photo ${i + 1}: ${uploadError.message}`);
-      const { data: { publicUrl } } = supabase.storage.from('property-photos').getPublicUrl(fileName);
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from('property-photos').getPublicUrl(fileName);
       uploadedUrls.push(publicUrl);
     }
     setUploadProgress(null);
@@ -192,43 +275,74 @@ export default function AddPropertyPage() {
         return false;
       }
       if (!isPhoneVerified) {
-        setError('Please verify your phone number before publishing a listing.');
+        setError('Verify your phone number before publishing.');
         setPhoneDialogOpen(true);
         return false;
       }
       if (!isLandlordVerified) {
-        setError('Your account must be verified before you can publish properties.');
+        setError('Your account must be verified before you can publish.');
         return false;
       }
     }
 
     if (!user) {
-      setError('You must be logged in to list a property');
+      setError('You must be logged in');
       return false;
     }
 
     try {
-      const propertyData = {
+      const intent = (formData.listing_intent || 'long_rent') as ListingIntent;
+      const category = (formData.asset_category || 'residential') as AssetCategory;
+      const subtype = formData.property_subtype || 'other_residential';
+      const pricePeriod = defaultPricePeriod(intent);
+
+      const propertyData: Record<string, unknown> = {
         landlord_id: user.id,
-        title: formData.title.trim() || 'Untitled Property',
-        description: formData.description.trim() || 'No description provided',
-        property_type: formData.property_type || 'other',
+        title: formData.title.trim() || 'Untitled',
+        description: formData.description.trim() || 'No description',
+        listing_intent: intent,
+        asset_category: category,
+        property_subtype: subtype,
+        property_type: subtypeToLegacyPropertyType(subtype),
+        listing_type:
+          category === 'land' ? 'land' : intent === 'sale' ? 'buy' : 'rent',
+        price_period: pricePeriod,
         tenure_type: formData.tenure_type || 'unsure',
         price: parseFloat(formData.price) || 0,
         location_city: formData.city || 'Unknown',
         location_suburb: formData.suburb.trim() || 'Unknown',
         location_address: formData.address.trim() || null,
-        bedrooms: formData.bedrooms !== '0' ? parseInt(formData.bedrooms) : null,
-        bathrooms: formData.bathrooms !== '0' ? parseFloat(formData.bathrooms) : null,
-        is_furnished: formData.is_furnished,
         amenities: formData.amenities,
         lease_terms: formData.lease_terms.trim() || null,
         contact_whatsapp: formData.contact_whatsapp.trim() || null,
-        contact_phone: formData.contact_phone ? normalizeEswatiniPhone(formData.contact_phone.trim()) : '',
+        contact_phone: formData.contact_phone
+          ? normalizeEswatiniPhone(formData.contact_phone.trim())
+          : '',
         status,
         views: 0,
         is_featured: false,
       };
+
+      if (category === 'residential') {
+        propertyData.bedrooms =
+          formData.bedrooms !== '0' ? parseInt(formData.bedrooms, 10) : null;
+        propertyData.bathrooms =
+          formData.bathrooms !== '0' ? parseFloat(formData.bathrooms) : null;
+        propertyData.is_furnished = formData.is_furnished;
+        propertyData.land_size_ha = null;
+        propertyData.is_fenced = null;
+      } else if (category === 'land') {
+        propertyData.bedrooms = null;
+        propertyData.bathrooms = null;
+        propertyData.is_furnished = false;
+        propertyData.land_size_ha = parseFloat(formData.land_size_ha) || null;
+        propertyData.is_fenced = formData.is_fenced;
+        propertyData.has_road_access = formData.has_road_access;
+        propertyData.has_water = formData.has_water;
+        propertyData.has_electricity = formData.has_electricity;
+        propertyData.has_sewer = formData.has_sewer;
+        propertyData.zoning_notes = formData.zoning_notes.trim() || null;
+      }
 
       const { data: property, error: propertyError } = await supabase
         .from('properties')
@@ -236,8 +350,8 @@ export default function AddPropertyPage() {
         .select()
         .single();
 
-      if (propertyError) throw new Error(`Failed to create property: ${propertyError.message}`);
-      if (!property) throw new Error('Property was created but no data was returned');
+      if (propertyError) throw new Error(`Failed to create: ${propertyError.message}`);
+      if (!property) throw new Error('No data returned');
 
       if (photos.length > 0) {
         try {
@@ -251,17 +365,17 @@ export default function AddPropertyPage() {
                 caption: null,
               }))
             );
-            if (photosError) toast.warning('Property created but some photos failed to save');
+            if (photosError) toast.warning('Listing saved but some photos failed');
           }
         } catch {
-          toast.warning('Property created but photos failed to upload.');
+          toast.warning('Listing saved but photos failed to upload');
         }
       }
 
       return property.id;
-    } catch (error: unknown) {
-      console.error('Save error:', error);
-      setError(error instanceof Error ? error.message : 'An unknown error occurred');
+    } catch (err: unknown) {
+      console.error('Save error:', err);
+      setError(err instanceof Error ? err.message : 'Unknown error');
       return false;
     }
   };
@@ -270,13 +384,13 @@ export default function AddPropertyPage() {
     e.preventDefault();
     if (!isPhoneVerified) {
       setPhoneDialogOpen(true);
-      toast.info('Verify your phone to publish listings');
+      toast.info('Verify your phone to publish');
       return;
     }
     setLoading(true);
-    const propertyId = await saveProperty('pending');
-    if (propertyId) {
-      toast.success('Property submitted for review!');
+    const id = await saveProperty('pending');
+    if (id) {
+      toast.success('Listing submitted for review');
       router.push('/dashboard/landlord');
     }
     setLoading(false);
@@ -284,9 +398,9 @@ export default function AddPropertyPage() {
 
   const handleSaveDraft = async () => {
     setSavingDraft(true);
-    const propertyId = await saveProperty('draft');
-    if (propertyId) {
-      toast.success('Draft saved successfully');
+    const id = await saveProperty('draft');
+    if (id) {
+      toast.success('Draft saved');
       router.push('/dashboard/landlord');
     }
     setSavingDraft(false);
@@ -298,162 +412,509 @@ export default function AddPropertyPage() {
     };
   }, [photoPreviews]);
 
+  const priceLabel =
+    formData.listing_intent === 'sale'
+      ? 'Sale price (E) *'
+      : formData.listing_intent === 'long_rent'
+        ? 'Monthly rent (E) *'
+        : 'Price (E) *';
+
+  const stepLabels = ['Category', 'Basics', 'Location', 'Details', 'Photos'];
+
   const renderStep = () => {
     switch (currentStep) {
       case 1:
         return (
           <div className="space-y-6">
-            <h2 className="text-xl font-semibold">Basic Information</h2>
+            <h2 className="text-xl font-semibold">What are you listing?</h2>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setCategory('residential')}
+                className={`rounded-xl border-2 p-4 text-left transition ${
+                  formData.asset_category === 'residential'
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:border-primary/50'
+                }`}
+              >
+                <Home className="h-6 w-6 mb-2 text-primary" />
+                <p className="font-semibold">{ASSET_CATEGORY_LABELS.residential}</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  House, flat, backrooms, shared room
+                </p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCategory('land')}
+                className={`rounded-xl border-2 p-4 text-left transition ${
+                  formData.asset_category === 'land'
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:border-primary/50'
+                }`}
+              >
+                <Map className="h-6 w-6 mb-2 text-primary" />
+                <p className="font-semibold">{ASSET_CATEGORY_LABELS.land}</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Residential plot, commercial plot, agricultural
+                </p>
+              </button>
+            </div>
+
+            {formData.asset_category && (
+              <>
+                <div>
+                  <Label className="mb-2 block">How is it offered? *</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(['sale', 'long_rent'] as ListingIntent[]).map((intent) => (
+                      <Button
+                        key={intent}
+                        type="button"
+                        variant={formData.listing_intent === intent ? 'default' : 'outline'}
+                        className="h-12"
+                        onClick={() => setIntent(intent)}
+                      >
+                        {LISTING_INTENT_LABELS[intent]}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="mb-2 block">Subtype *</Label>
+                  {isResidential && (
+                    <Select
+                      value={formData.property_subtype}
+                      onValueChange={(v) => setFormData((p) => ({ ...p, property_subtype: v }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select residential type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {RESIDENTIAL_SUBTYPES.map((s) => (
+                          <SelectItem key={s} value={s}>
+                            {RESIDENTIAL_SUBTYPE_LABELS[s as ResidentialSubtype]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  {isLand && (
+                    <Select
+                      value={formData.property_subtype}
+                      onValueChange={(v) => setFormData((p) => ({ ...p, property_subtype: v }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select land type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {LAND_SUBTYPES.map((s) => (
+                          <SelectItem key={s} value={s}>
+                            {LAND_SUBTYPE_LABELS[s as LandSubtype]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        );
+
+      case 2:
+        return (
+          <div className="space-y-6">
+            <h2 className="text-xl font-semibold">Basic information</h2>
+            <div className="flex flex-wrap gap-2 text-sm">
+              <Badge variant="outline">{ASSET_CATEGORY_LABELS[formData.asset_category as AssetCategory]}</Badge>
+              <Badge variant="outline">
+                {LISTING_INTENT_LABELS[formData.listing_intent as ListingIntent]}
+              </Badge>
+            </div>
             <div className="space-y-4">
               <div>
-                <Label htmlFor="title">Listing Title *</Label>
-                <Input id="title" placeholder="e.g., Spacious 2-Bedroom in Ngwane Park" value={formData.title} onChange={(e) => setFormData((p) => ({ ...p, title: e.target.value }))} required />
+                <Label htmlFor="title">Listing title *</Label>
+                <Input
+                  id="title"
+                  placeholder={
+                    isLand
+                      ? 'e.g. 0.5 ha residential plot in Sidwashini'
+                      : 'e.g. Spacious 2-bedroom in Ngwane Park'
+                  }
+                  value={formData.title}
+                  onChange={(e) => setFormData((p) => ({ ...p, title: e.target.value }))}
+                  required
+                />
               </div>
               <div>
-                <Label>Property Type *</Label>
-                <Select value={formData.property_type} onValueChange={(v) => setFormData((p) => ({ ...p, property_type: v as PropertyType }))}>
-                  <SelectTrigger><SelectValue placeholder="Select property type" /></SelectTrigger>
-                  <SelectContent>{PROPERTY_TYPES.map((t) => <SelectItem key={t} value={t} className="capitalize">{t}</SelectItem>)}</SelectContent>
+                <Label>Land tenure *</Label>
+                <Select
+                  value={formData.tenure_type}
+                  onValueChange={(v) => setFormData((p) => ({ ...p, tenure_type: v as TenureType }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select tenure" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TENURE_TYPES.map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {TENURE_CONFIG[t].label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
                 </Select>
+                <div className="mt-2">
+                  <TenureBadge tenure={formData.tenure_type} size="md" />
+                </div>
               </div>
               <div>
-                <Label>Land Tenure *</Label>
-                <Select value={formData.tenure_type} onValueChange={(v) => setFormData((p) => ({ ...p, tenure_type: v as TenureType }))}>
-                  <SelectTrigger><SelectValue placeholder="Select land tenure" /></SelectTrigger>
-                  <SelectContent>{TENURE_TYPES.map((t) => <SelectItem key={t} value={t}>{TENURE_CONFIG[t].label}</SelectItem>)}</SelectContent>
-                </Select>
-                <div className="mt-2"><TenureBadge tenure={formData.tenure_type} size="md" /></div>
-              </div>
-              <div>
-                <Label htmlFor="price">Monthly Rent (E) *</Label>
-                <Input id="price" type="number" min="1" placeholder="3500" value={formData.price} onChange={(e) => setFormData((p) => ({ ...p, price: e.target.value }))} required />
+                <Label htmlFor="price">{priceLabel}</Label>
+                <Input
+                  id="price"
+                  type="number"
+                  min="1"
+                  placeholder={formData.listing_intent === 'sale' ? '450000' : '3500'}
+                  value={formData.price}
+                  onChange={(e) => setFormData((p) => ({ ...p, price: e.target.value }))}
+                  required
+                />
               </div>
               <div>
                 <Label htmlFor="description">Description *</Label>
-                <Textarea id="description" rows={6} value={formData.description} onChange={(e) => setFormData((p) => ({ ...p, description: e.target.value }))} required />
+                <Textarea
+                  id="description"
+                  rows={6}
+                  value={formData.description}
+                  onChange={(e) => setFormData((p) => ({ ...p, description: e.target.value }))}
+                  required
+                />
               </div>
             </div>
           </div>
         );
-      case 2:
+
+      case 3:
         return (
           <div className="space-y-6">
             <h2 className="text-xl font-semibold">Location</h2>
             <div className="space-y-4">
               <div>
-                <Label>City/Town *</Label>
-                <Select value={formData.city} onValueChange={(v) => setFormData((p) => ({ ...p, city: v }))}>
-                  <SelectTrigger><SelectValue placeholder="Select city" /></SelectTrigger>
-                  <SelectContent>{ESWATINI_CITIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                <Label>City / town *</Label>
+                <Select
+                  value={formData.city}
+                  onValueChange={(v) => setFormData((p) => ({ ...p, city: v }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select city" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ESWATINI_CITIES.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
                 </Select>
               </div>
               <div>
-                <Label htmlFor="suburb">Suburb/Area *</Label>
-                <Input id="suburb" value={formData.suburb} onChange={(e) => setFormData((p) => ({ ...p, suburb: e.target.value }))} required />
+                <Label htmlFor="suburb">Suburb / area *</Label>
+                <Input
+                  id="suburb"
+                  value={formData.suburb}
+                  onChange={(e) => setFormData((p) => ({ ...p, suburb: e.target.value }))}
+                  required
+                />
               </div>
               <div>
-                <Label htmlFor="address">Street Address (Optional)</Label>
-                <Input id="address" value={formData.address} onChange={(e) => setFormData((p) => ({ ...p, address: e.target.value }))} />
+                <Label htmlFor="address">Street address (optional)</Label>
+                <Input
+                  id="address"
+                  value={formData.address}
+                  onChange={(e) => setFormData((p) => ({ ...p, address: e.target.value }))}
+                />
               </div>
             </div>
           </div>
         );
-      case 3:
+
+      case 4:
+        if (isLand) {
+          return (
+            <div className="space-y-6">
+              <h2 className="text-xl font-semibold">Land details</h2>
+              <div className="space-y-4">
+                <div>
+                  <Label htmlFor="land_size_ha">Size (hectares) *</Label>
+                  <Input
+                    id="land_size_ha"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    placeholder="e.g. 0.5"
+                    value={formData.land_size_ha}
+                    onChange={(e) => setFormData((p) => ({ ...p, land_size_ha: e.target.value }))}
+                    required
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">1 hectare ≈ 10,000 m²</p>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="is_fenced"
+                    checked={formData.is_fenced}
+                    onCheckedChange={(c) => setFormData((p) => ({ ...p, is_fenced: c as boolean }))}
+                  />
+                  <Label htmlFor="is_fenced">Fenced</Label>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {(
+                    [
+                      ['has_road_access', 'Road access'],
+                      ['has_water', 'Water available'],
+                      ['has_electricity', 'Electricity available'],
+                      ['has_sewer', 'Sewer / septic'],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <div key={key} className="flex items-center space-x-2">
+                      <Checkbox
+                        id={key}
+                        checked={formData[key]}
+                        onCheckedChange={(c) =>
+                          setFormData((p) => ({ ...p, [key]: c as boolean }))
+                        }
+                      />
+                      <Label htmlFor={key}>{label}</Label>
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <Label>Land features</Label>
+                  <div className="grid grid-cols-2 gap-3 mt-2">
+                    {LAND_AMENITIES.map((a) => (
+                      <div key={a} className="flex items-center space-x-2">
+                        <Checkbox
+                          id={a}
+                          checked={formData.amenities.includes(a)}
+                          onCheckedChange={() => handleAmenityToggle(a)}
+                        />
+                        <Label htmlFor={a} className="text-sm">
+                          {a}
+                        </Label>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <Label htmlFor="zoning_notes">Zoning / notes (optional)</Label>
+                  <Textarea
+                    id="zoning_notes"
+                    rows={3}
+                    placeholder="e.g. Residential zoning, near school"
+                    value={formData.zoning_notes}
+                    onChange={(e) => setFormData((p) => ({ ...p, zoning_notes: e.target.value }))}
+                  />
+                </div>
+                {formData.listing_intent === 'long_rent' && (
+                  <div>
+                    <Label htmlFor="lease_terms">Lease terms (optional)</Label>
+                    <Textarea
+                      id="lease_terms"
+                      rows={2}
+                      value={formData.lease_terms}
+                      onChange={(e) => setFormData((p) => ({ ...p, lease_terms: e.target.value }))}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        }
+
         return (
           <div className="space-y-6">
-            <h2 className="text-xl font-semibold">Property Details & Amenities</h2>
+            <h2 className="text-xl font-semibold">Property details & amenities</h2>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label>Bedrooms</Label>
-                <Select value={formData.bedrooms} onValueChange={(v) => setFormData((p) => ({ ...p, bedrooms: v }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>{ROOM_OPTIONS.map((n) => <SelectItem key={n} value={n}>{n === '0' ? 'None' : n}</SelectItem>)}</SelectContent>
+                <Label>Bedrooms *</Label>
+                <Select
+                  value={formData.bedrooms}
+                  onValueChange={(v) => setFormData((p) => ({ ...p, bedrooms: v }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ROOM_OPTIONS.map((n) => (
+                      <SelectItem key={n} value={n}>
+                        {n === '0' ? 'None / studio' : n}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
                 </Select>
               </div>
               <div>
-                <Label>Bathrooms</Label>
-                <Select value={formData.bathrooms} onValueChange={(v) => setFormData((p) => ({ ...p, bathrooms: v }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>{BATH_OPTIONS.map((n) => <SelectItem key={n} value={n}>{n === '0' ? 'None' : n}</SelectItem>)}</SelectContent>
+                <Label>Bathrooms *</Label>
+                <Select
+                  value={formData.bathrooms}
+                  onValueChange={(v) => setFormData((p) => ({ ...p, bathrooms: v }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {BATH_OPTIONS.map((n) => (
+                      <SelectItem key={n} value={n}>
+                        {n === '0' ? 'None' : n}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
                 </Select>
               </div>
             </div>
             <div className="flex items-center space-x-2">
-              <Checkbox id="furnished" checked={formData.is_furnished} onCheckedChange={(c) => setFormData((p) => ({ ...p, is_furnished: c as boolean }))} />
+              <Checkbox
+                id="furnished"
+                checked={formData.is_furnished}
+                onCheckedChange={(c) => setFormData((p) => ({ ...p, is_furnished: c as boolean }))}
+              />
               <Label htmlFor="furnished">Furnished</Label>
             </div>
             <div>
               <Label>Amenities</Label>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-2">
-                {ESWATINI_AMENITIES.map((a) => (
+                {RESIDENTIAL_AMENITIES.map((a) => (
                   <div key={a} className="flex items-center space-x-2">
-                    <Checkbox id={a} checked={formData.amenities.includes(a)} onCheckedChange={() => handleAmenityToggle(a)} />
-                    <Label htmlFor={a} className="text-sm">{a}</Label>
+                    <Checkbox
+                      id={a}
+                      checked={formData.amenities.includes(a)}
+                      onCheckedChange={() => handleAmenityToggle(a)}
+                    />
+                    <Label htmlFor={a} className="text-sm">
+                      {a}
+                    </Label>
                   </div>
                 ))}
               </div>
             </div>
-            <div>
-              <Label htmlFor="lease_terms">Lease Terms</Label>
-              <Textarea id="lease_terms" rows={3} value={formData.lease_terms} onChange={(e) => setFormData((p) => ({ ...p, lease_terms: e.target.value }))} />
-            </div>
+            {formData.listing_intent === 'long_rent' && (
+              <div>
+                <Label htmlFor="lease_terms">Lease terms</Label>
+                <Textarea
+                  id="lease_terms"
+                  rows={3}
+                  value={formData.lease_terms}
+                  onChange={(e) => setFormData((p) => ({ ...p, lease_terms: e.target.value }))}
+                />
+              </div>
+            )}
           </div>
         );
-      case 4:
+
+      case 5:
         return (
           <div className="space-y-6">
-            <h2 className="text-xl font-semibold">Photos & Contact</h2>
+            <h2 className="text-xl font-semibold">Photos & contact</h2>
             <div>
-              <Label>Property Photos (Max {MAX_PHOTOS})</Label>
+              <Label>Photos (max {MAX_PHOTOS})</Label>
               <div className="grid grid-cols-3 md:grid-cols-5 gap-4 mt-2 mb-4">
                 {photoPreviews.map((preview, index) => (
                   <div key={index} className="relative aspect-square">
                     <Image src={preview} alt="" fill className="object-cover rounded-lg" />
-                    <Button type="button" variant="destructive" size="icon" className="absolute -top-2 -right-2 h-6 w-6" onClick={() => removePhoto(index)}><X className="h-3 w-3" /></Button>
-                    {index === 0 && <Badge className="absolute bottom-2 left-2 bg-primary">Cover</Badge>}
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="icon"
+                      className="absolute -top-2 -right-2 h-6 w-6"
+                      onClick={() => removePhoto(index)}
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                    {index === 0 && (
+                      <Badge className="absolute bottom-2 left-2 bg-primary">Cover</Badge>
+                    )}
                   </div>
                 ))}
                 {photos.length < MAX_PHOTOS && (
                   <label className="aspect-square border-2 border-dashed rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-primary">
-                    <Upload className="h-6 w-6 text-gray-400 mb-1" />
-                    <span className="text-xs text-gray-500">Upload</span>
-                    <input type="file" accept="image/*" multiple className="hidden" onChange={handlePhotoUpload} />
+                    <Upload className="h-6 w-6 text-muted-foreground mb-1" />
+                    <span className="text-xs text-muted-foreground">Upload</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="hidden"
+                      onChange={handlePhotoUpload}
+                    />
                   </label>
                 )}
               </div>
             </div>
             {uploadProgress && (
               <div className="space-y-2">
-                <div className="flex justify-between text-sm"><span>Uploading...</span><span>{uploadProgress.current}/{uploadProgress.total}</span></div>
+                <div className="flex justify-between text-sm">
+                  <span>Uploading…</span>
+                  <span>
+                    {uploadProgress.current}/{uploadProgress.total}
+                  </span>
+                </div>
                 <Progress value={(uploadProgress.current / uploadProgress.total) * 100} />
               </div>
             )}
             <div className="space-y-4">
-              <h3 className="font-medium">Contact Information</h3>
+              <h3 className="font-medium">Contact</h3>
               <div>
-                <Label htmlFor="contact_phone">Phone Number *</Label>
-                <Input id="contact_phone" type="tel" placeholder="+268 7600 0000" value={formData.contact_phone} onChange={handlePhoneChange} required />
+                <Label htmlFor="contact_phone">Phone *</Label>
+                <Input
+                  id="contact_phone"
+                  type="tel"
+                  placeholder="+268 7600 0000"
+                  value={formData.contact_phone}
+                  onChange={(e) =>
+                    setFormData((p) => ({
+                      ...p,
+                      contact_phone: e.target.value.replace(/[^\d+]/g, ''),
+                    }))
+                  }
+                  required
+                />
               </div>
               <div>
-                <Label htmlFor="contact_whatsapp">WhatsApp (Optional)</Label>
-                <Input id="contact_whatsapp" type="tel" value={formData.contact_whatsapp} onChange={(e) => setFormData((p) => ({ ...p, contact_whatsapp: e.target.value.replace(/[^\d+]/g, '') }))} />
+                <Label htmlFor="contact_whatsapp">WhatsApp (optional)</Label>
+                <Input
+                  id="contact_whatsapp"
+                  type="tel"
+                  value={formData.contact_whatsapp}
+                  onChange={(e) =>
+                    setFormData((p) => ({
+                      ...p,
+                      contact_whatsapp: e.target.value.replace(/[^\d+]/g, ''),
+                    }))
+                  }
+                />
               </div>
             </div>
             {!isPhoneVerified && (
-              <Alert className="bg-amber-50 border-amber-200">
-                <AlertDescription className="text-amber-800 flex items-center justify-between gap-2 flex-wrap">
-                  <span className="flex items-center gap-2"><Smartphone className="h-4 w-4" /> Phone verification required to publish.</span>
-                  <Button type="button" size="sm" variant="outline" onClick={() => setPhoneDialogOpen(true)}>Verify phone</Button>
+              <Alert className="border-amber-500/30 bg-amber-500/10">
+                <AlertDescription className="flex items-center justify-between gap-2 flex-wrap text-amber-800 dark:text-amber-200">
+                  <span className="flex items-center gap-2">
+                    <Smartphone className="h-4 w-4" /> Phone verification required to publish
+                  </span>
+                  <Button type="button" size="sm" variant="outline" onClick={() => setPhoneDialogOpen(true)}>
+                    Verify phone
+                  </Button>
                 </AlertDescription>
               </Alert>
             )}
             {isPhoneVerified && (
-              <Alert className="bg-emerald-50 border-emerald-200">
-                <AlertDescription className="text-emerald-800">Phone verified — you can publish listings.</AlertDescription>
+              <Alert className="border-emerald-500/30 bg-emerald-500/10">
+                <AlertDescription className="text-emerald-800 dark:text-emerald-200">
+                  Phone verified — you can publish.
+                </AlertDescription>
               </Alert>
             )}
           </div>
         );
+
       default:
         return null;
     }
@@ -473,61 +934,102 @@ export default function AddPropertyPage() {
     <div className="container mx-auto px-4 py-8 max-w-3xl">
       <div className="mb-8">
         <Button variant="ghost" asChild className="mb-4">
-          <Link href="/dashboard/landlord"><ChevronLeft className="h-4 w-4 mr-1" />Back to Dashboard</Link>
+          <Link href="/dashboard/landlord">
+            <ChevronLeft className="h-4 w-4 mr-1" />
+            Back to dashboard
+          </Link>
         </Button>
-        <h1 className="text-3xl font-bold">Add New Property</h1>
-        <p className="text-gray-600">List your property on Ekhaya</p>
+        <h1 className="text-3xl font-bold">Add listing</h1>
+        <p className="text-muted-foreground">Residential or land on Ekhaya</p>
       </div>
 
       {!isLandlordVerified && (
-        <Card className="border-amber-200 bg-amber-50 mb-6">
+        <Card className="border-amber-500/30 bg-amber-500/10 mb-6">
           <CardContent className="p-6">
             <div className="flex items-start gap-4">
-              {isLandlordPending ? <Clock className="h-8 w-8 text-amber-600" /> : <AlertCircle className="h-8 w-8 text-red-600" />}
+              {isLandlordPending ? (
+                <Clock className="h-8 w-8 text-amber-600 dark:text-amber-400" />
+              ) : (
+                <AlertCircle className="h-8 w-8 text-red-600 dark:text-red-400" />
+              )}
               <div>
-                <h3 className="font-semibold">{isLandlordPending ? 'Verification Pending' : 'Verification Required'}</h3>
-                <p className="text-sm text-muted-foreground">You can save drafts now. Publish requires account verification and phone OTP.</p>
-                {!isLandlordPending && (
-                  <Button asChild className="mt-3" size="sm"><Link href="/dashboard/landlord/verify"><Shield className="mr-2 h-4 w-4" />Start Verification</Link></Button>
-                )}
+                <h3 className="font-semibold">
+                  {isLandlordPending ? 'Verification pending' : 'Verification required'}
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  You can save drafts now. Publish needs account verification and phone OTP.
+                </p>
               </div>
             </div>
           </CardContent>
         </Card>
       )}
 
-      <div className="mb-8 flex justify-between">
-        {[1, 2, 3, 4].map((step) => (
-          <div key={step} className={`flex-1 text-center ${step <= currentStep ? 'text-primary' : 'text-gray-400'}`}>
-            <div className={`w-8 h-8 mx-auto rounded-full flex items-center justify-center mb-2 ${step < currentStep ? 'bg-primary text-white' : step === currentStep ? 'border-2 border-primary' : 'border-2 border-gray-300'}`}>{step}</div>
-            <span className="text-sm hidden md:block">{step === 1 ? 'Basic Info' : step === 2 ? 'Location' : step === 3 ? 'Details' : 'Photos'}</span>
-          </div>
-        ))}
+      <div className="mb-8 flex justify-between gap-1">
+        {stepLabels.map((label, i) => {
+          const step = i + 1;
+          return (
+            <div
+              key={step}
+              className={`flex-1 text-center ${step <= currentStep ? 'text-primary' : 'text-muted-foreground'}`}
+            >
+              <div
+                className={`w-8 h-8 mx-auto rounded-full flex items-center justify-center mb-2 text-sm ${
+                  step < currentStep
+                    ? 'bg-primary text-primary-foreground'
+                    : step === currentStep
+                      ? 'border-2 border-primary'
+                      : 'border-2 border-muted'
+                }`}
+              >
+                {step}
+              </div>
+              <span className="text-xs hidden sm:block">{label}</span>
+            </div>
+          );
+        })}
       </div>
 
       <form onSubmit={handleSubmit}>
-        {error && <Alert variant="destructive" className="mb-6"><AlertDescription>{error}</AlertDescription></Alert>}
-        <Card><CardContent className="p-6">{renderStep()}</CardContent></Card>
+        {error && (
+          <Alert variant="destructive" className="mb-6">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        <Card>
+          <CardContent className="p-6">{renderStep()}</CardContent>
+        </Card>
         <div className="flex justify-between mt-6">
           <Button type="button" variant="outline" onClick={handlePrevious} disabled={currentStep === 1}>
-            <ChevronLeft className="h-4 w-4 mr-2" />Previous
+            <ChevronLeft className="h-4 w-4 mr-2" />
+            Previous
           </Button>
           <div className="flex gap-2">
-            {currentStep === totalSteps && (
+            {currentStep === TOTAL_STEPS && (
               <Button type="button" variant="outline" onClick={handleSaveDraft} disabled={savingDraft}>
-                {savingDraft ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                Save Draft
+                {savingDraft ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="mr-2 h-4 w-4" />
+                )}
+                Save draft
               </Button>
             )}
-            {currentStep < totalSteps ? (
-              <Button type="button" onClick={handleNext}>Next<ChevronRight className="h-4 w-4 ml-2" /></Button>
+            {currentStep < TOTAL_STEPS ? (
+              <Button type="button" onClick={handleNext}>
+                Next
+                <ChevronRight className="h-4 w-4 ml-2" />
+              </Button>
             ) : isLandlordVerified ? (
               <Button type="submit" disabled={loading}>
                 {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Submit for Review
+                Submit for review
               </Button>
             ) : (
-              <Button type="button" variant="secondary" disabled><Eye className="mr-2 h-4 w-4" />Verify to Submit</Button>
+              <Button type="button" variant="secondary" disabled>
+                <Eye className="mr-2 h-4 w-4" />
+                Verify to submit
+              </Button>
             )}
           </div>
         </div>
@@ -539,7 +1041,7 @@ export default function AddPropertyPage() {
         defaultPhone={formData.contact_phone}
         onVerified={() => {
           refreshPhone();
-          toast.success('Phone verified — you can publish now');
+          toast.success('Phone verified');
         }}
       />
     </div>
