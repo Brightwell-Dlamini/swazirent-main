@@ -1,16 +1,10 @@
 // src/components/auth/PhoneVerifyDialog.tsx
 'use client';
 
-import { useState } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,7 +16,6 @@ interface PhoneVerifyDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onVerified?: () => void;
-  /** Prefill from profile */
   defaultPhone?: string;
 }
 
@@ -32,12 +25,20 @@ export function PhoneVerifyDialog({
   onVerified,
   defaultPhone = '',
 }: PhoneVerifyDialogProps) {
-  const { user, session } = useAuth() as any;
   const [step, setStep] = useState<'phone' | 'code'>('phone');
   const [phone, setPhone] = useState(defaultPhone);
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [devCode, setDevCode] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setPhone(defaultPhone || '');
+      setStep('phone');
+      setCode('');
+      setDevCode(null);
+    }
+  }, [open, defaultPhone]);
 
   const getToken = async (): Promise<string | null> => {
     const { data } = await supabase.auth.getSession();
@@ -104,7 +105,7 @@ export function PhoneVerifyDialog({
         toast.error(data.error || 'Invalid code');
         return;
       }
-      toast.success('Phone verified!');
+      toast.success('Phone verified');
       onVerified?.();
       onOpenChange(false);
       setStep('phone');
@@ -126,30 +127,27 @@ export function PhoneVerifyDialog({
             Verify your phone
           </DialogTitle>
           <DialogDescription>
-            Phone verification is required before posting listings on Ekhaya.
+            One verification for your account. Listings will use this number.
           </DialogDescription>
         </DialogHeader>
 
         {step === 'phone' ? (
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label htmlFor="otp-phone">Eswatini phone number</Label>
-              <Input
-                id="otp-phone"
-                type="tel"
-                placeholder="+268 76XX XXXX"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                We will send a 6-digit code via SMS.
-              </p>
-            </div>
+          <div className="space-y-2 py-2">
+            <Label htmlFor="otp-phone">Eswatini mobile</Label>
+            <Input
+              id="otp-phone"
+              type="tel"
+              placeholder="+268 76XX XXXX"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              autoComplete="tel"
+            />
+            <p className="text-xs text-muted-foreground">We’ll text a 6-digit code.</p>
           </div>
         ) : (
-          <div className="space-y-4 py-2">
+          <div className="space-y-3 py-2">
             <div className="space-y-2">
-              <Label htmlFor="otp-code">Verification code</Label>
+              <Label htmlFor="otp-code">Code</Label>
               <Input
                 id="otp-code"
                 type="text"
@@ -158,30 +156,34 @@ export function PhoneVerifyDialog({
                 placeholder="000000"
                 value={code}
                 onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                autoComplete="one-time-code"
+                className="tracking-widest text-center text-lg"
               />
               {devCode && (
-                <p className="text-xs text-amber-600 bg-amber-50 p-2 rounded">
-                  Dev mode code: <strong>{devCode}</strong>
+                <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-500/10 p-2 rounded-md">
+                  Dev code: <strong>{devCode}</strong>
                 </p>
               )}
             </div>
             <Button type="button" variant="link" className="px-0 h-auto text-sm" onClick={() => setStep('phone')}>
-              Change number / resend
+              Change number
             </Button>
           </div>
         )}
 
-        <DialogFooter>
+        <DialogFooter className="gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>
             Cancel
           </Button>
           {step === 'phone' ? (
             <Button onClick={sendOtp} disabled={loading}>
-              {loading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Sending...</> : 'Send code'}
+              {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Send code
             </Button>
           ) : (
             <Button onClick={verifyOtp} disabled={loading}>
-              {loading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Verifying...</> : 'Verify'}
+              {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Verify
             </Button>
           )}
         </DialogFooter>

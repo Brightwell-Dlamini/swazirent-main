@@ -9,31 +9,18 @@ export function BackToTop() {
   const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
-    const toggleVisibility = () => {
-      if (window.scrollY > 300) {
-        setIsVisible(true);
-      } else {
-        setIsVisible(false);
-      }
-    };
-
-    window.addEventListener('scroll', toggleVisibility, { passive: true });
-    return () => window.removeEventListener('scroll', toggleVisibility);
+    const onScroll = () => setIsVisible(window.scrollY > 480);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
   }, []);
-
-  const scrollToTop = () => {
-    window.scrollTo({
-      top: 0,
-      behavior: 'smooth',
-    });
-  };
 
   if (!isVisible) return null;
 
   return (
     <Button
-      onClick={scrollToTop}
-      className="fixed bottom-6 right-6 z-50 w-12 h-12 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-110 active:scale-95"
+      onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+      size="icon"
+      className="fixed bottom-5 right-5 z-50 h-11 w-11 rounded-full shadow-md border border-border bg-card text-foreground hover:bg-muted"
       aria-label="Back to top"
     >
       <ChevronUp className="h-5 w-5" />
