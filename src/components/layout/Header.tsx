@@ -115,22 +115,27 @@ export function Header() {
             <span className="font-bold text-lg text-foreground">Ekhaya</span>
           </Link>
 
-          <nav className="hidden md:flex items-center gap-1">
-            {navLinks.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  pathname?.startsWith(link.href)
-                    ? 'text-primary'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {link.label}
-              </Link>
-            ))}
-            <Button variant="secondary" size="sm" className="ml-2" onClick={handleListProperty}>
-              <PlusCircle className="h-4 w-4 mr-1" />
+          <nav className="hidden md:flex items-center gap-0.5">
+            {navLinks.map((link) => {
+              const Icon = link.icon;
+              const active = pathname?.startsWith(link.href);
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    active
+                      ? 'text-primary bg-primary/5'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+                  }`}
+                >
+                  <Icon className="h-4 w-4 shrink-0 opacity-80" />
+                  {link.label}
+                </Link>
+              );
+            })}
+            <Button variant="secondary" size="sm" className="ml-2 gap-1.5" onClick={handleListProperty}>
+              <PlusCircle className="h-4 w-4" />
               {listButtonLabel}
             </Button>
           </nav>
@@ -225,7 +230,6 @@ export function Header() {
                   <Menu className="h-5 w-5" />
                 </Button>
               </SheetTrigger>
-              {/* Not full width — drawer feel */}
               <SheetContent side="right" className="w-[min(82vw,18rem)] sm:max-w-[18rem] p-0">
                 <SheetTitle className="sr-only">Menu</SheetTitle>
                 <div className="flex items-center justify-between px-4 py-3 border-b border-border">
@@ -247,9 +251,7 @@ export function Header() {
                         href={link.href}
                         onClick={() => setMobileMenuOpen(false)}
                         className={`flex items-center gap-3 px-3 py-3 rounded-lg text-base font-medium transition-colors ${
-                          active
-                            ? 'bg-primary/10 text-primary'
-                            : 'text-foreground hover:bg-muted'
+                          active ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted'
                         }`}
                       >
                         <Icon className="h-5 w-5 shrink-0 opacity-80" />
@@ -265,7 +267,6 @@ export function Header() {
                     <PlusCircle className="h-5 w-5 shrink-0 opacity-80" />
                     {listButtonLabel}
                   </button>
-
                   {!user && (
                     <div className="mt-3 space-y-2 border-t border-border pt-3 px-1">
                       <Button className="w-full" asChild>
@@ -311,8 +312,8 @@ export function Header() {
             <AlertDialogTitle className="flex items-center gap-2">
               <Building2 className="h-5 w-5 text-primary" />List on Ekhaya
             </AlertDialogTitle>
-            <AlertDialogDescription className="space-y-3">
-              <p>Seekers can save listings. To post, switch to a landlord, broker, or agent account.</p>
+            <AlertDialogDescription>
+              Seekers can save listings. To post, switch to a landlord, broker, or agent account.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

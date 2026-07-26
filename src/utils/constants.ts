@@ -30,7 +30,6 @@ export const LISTING_TYPES = ['buy', 'rent', 'land'] as const;
 
 export const LISTING_INTENTS = ['sale', 'long_rent'] as const;
 
-/** MVP + Phase 2 (no short_stay) */
 export const ASSET_CATEGORIES = ['residential', 'land', 'commercial'] as const;
 
 export const RESIDENTIAL_SUBTYPES = [
@@ -61,55 +60,46 @@ export const FIT_OUT_OPTIONS = ['shell', 'semi', 'fitted'] as const;
 
 export const TENURE_TYPES = ['title_deed', 'leasehold', 'snl', 'unsure'] as const;
 
+/**
+ * Amenities people actually mention on Eswatini FB marketplace / rental groups.
+ * Keep short — seekers scan, they don't tick 20 boxes.
+ */
 export const RESIDENTIAL_AMENITIES = [
-  'Water tank',
-  'Borehole',
-  'Solar',
+  'Borehole / water tank',
   'Prepaid electricity',
-  'Security / guard',
-  'Boundary wall',
+  'Security / wall',
   'Parking',
-  'Garage',
-  'Garden',
   'Staff quarters',
-  'Fibre / Wi-Fi',
-  'Backup power',
+  'Fibre / Wi‑Fi',
+  'Solar / backup power',
+  'Garden',
   'Pet friendly',
-  'Own electricity meter',
-  'Shared electricity meter',
-  'Own water meter',
-  'Shower',
-  'Bathtub',
 ] as const;
 
 export const LAND_AMENITIES = [
   'Fenced',
-  'Gate',
-  'Gravel access',
-  'Tar access',
-  'Corner stand',
+  'Road access',
   'Flat / level',
-  'Services on boundary',
+  'Services nearby',
   'Surveyed / beacons',
+  'Corner stand',
 ] as const;
 
 export const COMMERCIAL_AMENITIES = [
-  'Air conditioning',
-  'Lift',
-  'Reception',
-  'Toilets',
+  'Parking',
+  'Security',
   'Fibre',
   'Generator',
-  'Security',
-  'Parking',
-  'Loading bay',
+  'Air conditioning',
   'Street frontage',
+  'Loading bay',
 ] as const;
 
 /** @deprecated */
 export const ESWATINI_AMENITIES = RESIDENTIAL_AMENITIES;
 
 export const MAX_PHOTOS = 10;
+export const MIN_PHOTOS_PUBLISH = 1;
 export const MAX_FILE_SIZE = 5 * 1024 * 1024;
 export const MAX_DOCUMENT_SIZE = 10 * 1024 * 1024;
 
