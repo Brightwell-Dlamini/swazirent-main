@@ -1,15 +1,9 @@
 -- =============================================================================
--- FIX: "Database error saving new user" on signup
+-- FIX: "Database error saving new user" on signup + landlord first-class
 -- Date: 2026-07-26
---
--- Cause: profiles.user_type (or a trigger inserting into profiles) only allowed
---        legacy values 'renter' | 'landlord'. App now sends seeker | broker | agent.
---        Auth insert → trigger fails → Supabase returns that error message.
---
--- Run this in Supabase → SQL Editor → Run (safe to re-run).
+-- Run in Supabase → SQL Editor (safe to re-run).
 -- =============================================================================
 
--- 1) Widen user_type check constraint (drop any existing check on user_type)
 DO $$
 DECLARE
   r record;
@@ -28,25 +22,21 @@ BEGIN
   END LOOP;
 END $$;
 
--- Allow canonical + legacy values
-ALTER TABLE public.profiles
-  DROP CONSTRAINT IF EXISTS profiles_user_type_check;
+ALTER TABLE public.profiles DROP CONSTRAINT IF EXISTS profiles_user_type_check;
 
 ALTER TABLE public.profiles
   ADD CONSTRAINT profiles_user_type_check
   CHECK (
     user_type IS NULL
     OR user_type IN (
-      'seeker', 'broker', 'agent', 'admin',
-      'renter', 'landlord'  -- legacy
+      'seeker', 'landlord', 'broker', 'agent', 'admin',
+      'renter'  -- legacy only
     )
   );
 
--- Sensible default for new rows if column has no default
 ALTER TABLE public.profiles
   ALTER COLUMN user_type SET DEFAULT 'seeker';
 
--- 2) Replace handle_new_user trigger function (name may vary; cover common ones)
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -59,10 +49,11 @@ DECLARE
 BEGIN
   raw_type := lower(coalesce(new.raw_user_meta_data->>'user_type', 'seeker'));
 
-  -- Map legacy + new personas
   IF raw_type IN ('renter', 'seeker') THEN
     canonical := 'seeker';
-  ELSIF raw_type IN ('landlord', 'broker') THEN
+  ELSIF raw_type = 'landlord' THEN
+    canonical := 'landlord';
+  ELSIF raw_type = 'broker' THEN
     canonical := 'broker';
   ELSIF raw_type = 'agent' THEN
     canonical := 'agent';
@@ -73,14 +64,7 @@ BEGIN
   END IF;
 
   INSERT INTO public.profiles (
-    id,
-    email,
-    full_name,
-    phone,
-    user_type,
-    is_verified,
-    created_at,
-    updated_at
+    id, email, full_name, phone, user_type, is_verified, created_at, updated_at
   )
   VALUES (
     new.id,
@@ -102,34 +86,19 @@ BEGIN
   RETURN new;
 EXCEPTION
   WHEN others THEN
-    -- Never block auth.users insert; log and continue
     RAISE WARNING 'handle_new_user failed: %', SQLERRM;
     RETURN new;
 END;
 $$;
 
--- Ensure trigger exists on auth.users
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_new_user();
 
--- Alternate name used by some projects
-CREATE OR REPLACE FUNCTION public.on_auth_user_created()
-RETURNS trigger
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-BEGIN
-  RETURN public.handle_new_user();
-END;
-$$;
-
--- 3) Optional legacy role labels in existing profiles (optional, non-destructive intent)
-UPDATE public.profiles SET user_type = 'seeker'  WHERE user_type = 'renter';
-UPDATE public.profiles SET user_type = 'broker'  WHERE user_type = 'landlord';
+-- Do NOT auto-rewrite landlord → broker; landlord is first-class.
+UPDATE public.profiles SET user_type = 'seeker' WHERE user_type = 'renter';
 
 COMMENT ON COLUMN public.profiles.user_type IS
-  'Ekhaya roles: seeker | broker | agent | admin. Legacy renter/landlord still accepted by CHECK.';
+  'seeker | landlord | broker | agent | admin (legacy renter accepted)';
