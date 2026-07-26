@@ -1,9 +1,14 @@
 import type { MetadataRoute } from 'next';
 import { createClient } from '@supabase/supabase-js';
+import { CITY_CENTROIDS } from '@/utils/eswatini-geo';
 
 const BASE =
   process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') ||
   'https://eswaproperty.vercel.app';
+
+function citySlug(name: string) {
+  return name.toLowerCase().replace(/\s+/g, '-');
+}
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const now = new Date();
@@ -18,6 +23,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${BASE}/blog`, lastModified: now, changeFrequency: 'weekly', priority: 0.45 },
     { url: `${BASE}/newsletter`, lastModified: now, changeFrequency: 'monthly', priority: 0.3 },
   ];
+
+  const cityRoutes: MetadataRoute.Sitemap = Object.keys(CITY_CENTROIDS).map((city) => ({
+    url: `${BASE}/in/${citySlug(city)}`,
+    lastModified: now,
+    changeFrequency: 'daily' as const,
+    priority: 0.75,
+  }));
 
   let propertyRoutes: MetadataRoute.Sitemap = [];
 
@@ -46,5 +58,5 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     console.warn('[sitemap] property fetch failed', e);
   }
 
-  return [...staticRoutes, ...propertyRoutes];
+  return [...staticRoutes, ...cityRoutes, ...propertyRoutes];
 }
