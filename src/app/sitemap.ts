@@ -1,6 +1,7 @@
 import type { MetadataRoute } from 'next';
 import { createClient } from '@supabase/supabase-js';
 import { CITY_CENTROIDS } from '@/utils/eswatini-geo';
+import { BLOG_POSTS } from '@/lib/blog';
 
 const BASE =
   process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') ||
@@ -22,7 +23,16 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${BASE}/faqs`, lastModified: now, changeFrequency: 'monthly', priority: 0.5 },
     { url: `${BASE}/blog`, lastModified: now, changeFrequency: 'weekly', priority: 0.45 },
     { url: `${BASE}/newsletter`, lastModified: now, changeFrequency: 'monthly', priority: 0.3 },
+    { url: `${BASE}/privacy`, lastModified: now, changeFrequency: 'yearly', priority: 0.2 },
+    { url: `${BASE}/terms`, lastModified: now, changeFrequency: 'yearly', priority: 0.2 },
   ];
+
+  const blogRoutes: MetadataRoute.Sitemap = BLOG_POSTS.map((p) => ({
+    url: `${BASE}/blog/${p.id}`,
+    lastModified: new Date(p.date),
+    changeFrequency: 'monthly' as const,
+    priority: 0.4,
+  }));
 
   const cityRoutes: MetadataRoute.Sitemap = Object.keys(CITY_CENTROIDS).map((city) => ({
     url: `${BASE}/in/${citySlug(city)}`,
@@ -58,5 +68,5 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     console.warn('[sitemap] property fetch failed', e);
   }
 
-  return [...staticRoutes, ...cityRoutes, ...propertyRoutes];
+  return [...staticRoutes, ...blogRoutes, ...cityRoutes, ...propertyRoutes];
 }
