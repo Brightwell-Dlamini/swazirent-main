@@ -16,7 +16,7 @@ export const ESWATINI_CITIES = [
   'Simunye',
 ] as const;
 
-/** @deprecated prefer RESIDENTIAL_SUBTYPES / LAND_SUBTYPES */
+/** @deprecated */
 export const PROPERTY_TYPES = [
   'house',
   'flat/apartment',
@@ -25,12 +25,13 @@ export const PROPERTY_TYPES = [
   'other',
 ] as const;
 
-/** @deprecated prefer LISTING_INTENTS */
+/** @deprecated */
 export const LISTING_TYPES = ['buy', 'rent', 'land'] as const;
 
-export const LISTING_INTENTS = ['sale', 'long_rent'] as const; // short_stay Phase 3
+export const LISTING_INTENTS = ['sale', 'long_rent'] as const;
 
-export const ASSET_CATEGORIES = ['residential', 'land'] as const; // commercial Phase 2
+/** MVP + Phase 2 (no short_stay) */
+export const ASSET_CATEGORIES = ['residential', 'land', 'commercial'] as const;
 
 export const RESIDENTIAL_SUBTYPES = [
   'house',
@@ -48,9 +49,18 @@ export const LAND_SUBTYPES = [
   'other_land',
 ] as const;
 
+export const COMMERCIAL_SUBTYPES = [
+  'office',
+  'retail',
+  'warehouse',
+  'mixed_use',
+  'other_commercial',
+] as const;
+
+export const FIT_OUT_OPTIONS = ['shell', 'semi', 'fitted'] as const;
+
 export const TENURE_TYPES = ['title_deed', 'leasehold', 'snl', 'unsure'] as const;
 
-/** Residential amenities (MVP) */
 export const RESIDENTIAL_AMENITIES = [
   'Water tank',
   'Borehole',
@@ -72,7 +82,6 @@ export const RESIDENTIAL_AMENITIES = [
   'Bathtub',
 ] as const;
 
-/** Land amenities (MVP) */
 export const LAND_AMENITIES = [
   'Fenced',
   'Gate',
@@ -84,7 +93,20 @@ export const LAND_AMENITIES = [
   'Surveyed / beacons',
 ] as const;
 
-/** @deprecated use RESIDENTIAL_AMENITIES */
+export const COMMERCIAL_AMENITIES = [
+  'Air conditioning',
+  'Lift',
+  'Reception',
+  'Toilets',
+  'Fibre',
+  'Generator',
+  'Security',
+  'Parking',
+  'Loading bay',
+  'Street frontage',
+] as const;
+
+/** @deprecated */
 export const ESWATINI_AMENITIES = RESIDENTIAL_AMENITIES;
 
 export const MAX_PHOTOS = 10;
