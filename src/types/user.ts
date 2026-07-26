@@ -1,38 +1,45 @@
 // src/types/user.ts
-// Ekhaya hybrid model — roles aligned with DOC-001 / DOC-005
-// Mapping: former 'renter' → 'seeker', former 'landlord' split into 'broker' | 'agent'
-// Legacy values remain on the union so existing pages still type-check until fully migrated.
+// Ekhaya personas (DOC-aligned + product decision):
+//   seeker   — renter / buyer
+//   landlord — property owner who lists themselves
+//   broker   — facilitator hired to find tenants
+//   agent    — professional estate agent
+//   admin    — platform operator
+// Legacy: 'renter' reads as seeker. 'landlord' is canonical (not mapped away).
 
 export type UserType =
   | 'seeker'
-  | 'agent'
+  | 'landlord'
   | 'broker'
+  | 'agent'
   | 'admin'
-  | 'landlord' // legacy — treat as broker/poster
-  | 'renter'; // legacy — treat as seeker
+  | 'renter'; // legacy only — normalize to seeker
+
+export type PosterRole = 'landlord' | 'broker' | 'agent' | 'admin';
 
 export type LegacyUserType = UserType;
+
+export const POSTER_ROLES: UserType[] = ['landlord', 'broker', 'agent', 'admin'];
 
 export const isValidUserType = (type: string | null | undefined): type is UserType => {
   return (
     type === 'seeker' ||
-    type === 'agent' ||
-    type === 'broker' ||
-    type === 'admin' ||
     type === 'landlord' ||
+    type === 'broker' ||
+    type === 'agent' ||
+    type === 'admin' ||
     type === 'renter'
   );
 };
 
 /**
- * Normalises any stored role (including legacy values) to the preferred canonical set.
- * - renter  → seeker
- * - landlord → broker
+ * Normalise stored roles.
+ * - renter → seeker (legacy only)
+ * - landlord stays landlord (first-class)
  */
 export const normalizeUserType = (type: string | null | undefined): UserType => {
   if (!type) return 'seeker';
   if (type === 'renter') return 'seeker';
-  if (type === 'landlord') return 'broker';
   if (isValidUserType(type)) return type;
   return 'seeker';
 };
@@ -42,8 +49,9 @@ export const getDefaultRedirect = (userType: UserType | null): string => {
   switch (t) {
     case 'admin':
       return '/dashboard/admin';
-    case 'agent':
+    case 'landlord':
     case 'broker':
+    case 'agent':
       return '/dashboard/landlord';
     case 'seeker':
     default:
@@ -62,6 +70,8 @@ export const getUserTypeLabel = (userType: UserType | null): string => {
       return 'Agent';
     case 'broker':
       return 'Broker';
+    case 'landlord':
+      return 'Landlord';
     case 'seeker':
       return 'Seeker';
     default:
@@ -77,6 +87,8 @@ export const getUserTypeIcon = (userType: UserType | null): string => {
     case 'agent':
       return '🏢';
     case 'broker':
+      return '🤝';
+    case 'landlord':
       return '🏠';
     case 'seeker':
       return '🔍';
@@ -88,10 +100,16 @@ export const getUserTypeIcon = (userType: UserType | null): string => {
 /** Roles allowed to post listings (phone verification still required to publish) */
 export const canPostListings = (userType: UserType | null): boolean => {
   const t = normalizeUserType(userType);
-  return t === 'agent' || t === 'broker' || t === 'admin';
+  return t === 'landlord' || t === 'broker' || t === 'agent' || t === 'admin';
 };
 
 /** Seeker (includes legacy renter) */
 export const isSeekerRole = (userType: UserType | null): boolean => {
   return normalizeUserType(userType) === 'seeker';
+};
+
+/** Poster roles that need admin verification */
+export const isPosterRole = (userType: UserType | null): boolean => {
+  const t = normalizeUserType(userType);
+  return t === 'landlord' || t === 'broker' || t === 'agent';
 };
