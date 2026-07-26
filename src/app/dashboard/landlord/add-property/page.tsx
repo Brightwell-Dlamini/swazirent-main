@@ -3,7 +3,6 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import Image from 'next/image';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { useVerification } from '@/hooks/useVerification';
@@ -21,7 +20,7 @@ import { canPostListings, normalizeUserType } from '@/types/user';
 import {
   ESWATINI_CITIES, TENURE_TYPES, RESIDENTIAL_SUBTYPES, LAND_SUBTYPES, COMMERCIAL_SUBTYPES,
   FIT_OUT_OPTIONS, RESIDENTIAL_AMENITIES, LAND_AMENITIES, COMMERCIAL_AMENITIES,
-  ROOM_OPTIONS, BATH_OPTIONS, MAX_PHOTOS,
+  ROOM_OPTIONS, BATH_OPTIONS, MAX_PHOTOS, MIN_PHOTOS_PUBLISH,
 } from '@/utils/constants';
 import { isValidEswatiniPhone } from '@/utils/phone';
 import { Button } from '@/components/ui/button';
@@ -36,26 +35,56 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
 import {
-  ChevronLeft, ChevronRight, Loader2, Upload, X, Save, Eye, AlertCircle, Clock,
+  ChevronLeft, ChevronRight, Loader2, Save, Eye, AlertCircle, Clock,
   Home, Map, Building2,
 } from 'lucide-react';
 import { TenureBadge } from '@/components/properties/TenureBadge';
 import { PhoneVerifyDialog } from '@/components/auth/PhoneVerifyDialog';
 import { ContactPhoneFields } from '@/components/listings/ContactPhoneFields';
+import { PhotoGrid } from '@/components/listings/PhotoGrid';
+import { cn } from '@/lib/utils';
 
 const TOTAL_STEPS = 5;
+const STEP_LABELS = ['Category', 'Basics', 'Location', 'Details', 'Photos'];
+
+function Field({
+  label,
+  htmlFor,
+  error,
+  children,
+  hint,
+}: {
+  label: string;
+  htmlFor?: string;
+  error?: string;
+  children: React.ReactNode;
+  hint?: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={htmlFor} className={cn(error && 'text-destructive')}>{label}</Label>
+      {children}
+      {hint && !error && <p className="text-xs text-muted-foreground">{hint}</p>}
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </div>
+  );
+}
 
 export default function AddPropertyPage() {
   const { user, userType, isLoading: authLoading } = useAuth();
   const { isLandlordVerified, isLandlordPending, refreshVerification } = useVerification();
   const { isPhoneVerified, phone: accountPhone, refresh: refreshPhone } = usePhoneVerification();
-  const { photos, photoPreviews, compressing, handlePhotoUpload, removePhoto } = useListingPhotos(MAX_PHOTOS);
+  const {
+    photos, photoPreviews, compressing,
+    handlePhotoUpload, handleDrop, removePhoto, movePhoto, setAsCover,
+  } = useListingPhotos(MAX_PHOTOS);
   const router = useRouter();
 
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
   const [phoneDialogOpen, setPhoneDialogOpen] = useState(false);
@@ -122,20 +151,67 @@ export default function AddPropertyPage() {
     }
   }, [user, userType, isLandlordPending, refreshVerification]);
 
+  /** Map field → wizard step */
+  const fieldStep = (key: string): number => {
+    if (['asset_category', 'listing_intent', 'property_subtype'].includes(key)) return 1;
+    if (['title', 'description', 'price', 'tenure_type'].includes(key)) return 2;
+    if (['city', 'suburb', 'address'].includes(key)) return 3;
+    if (['land_size_ha', 'floor_area_sqm', 'bedrooms', 'bathrooms'].includes(key)) return 4;
+    if (['photos', 'contact_phone'].includes(key)) return 5;
+    return 1;
+  };
+
+  const validateForPublish = (): Record<string, string> => {
+    const e: Record<string, string> = {};
+    if (!formData.asset_category) e.asset_category = 'Choose a category';
+    if (!formData.listing_intent) e.listing_intent = 'Sale or rent?';
+    if (!formData.property_subtype) e.property_subtype = 'Choose a subtype';
+    if (!formData.title.trim()) e.title = 'Title is required';
+    if (!formData.description.trim()) e.description = 'Description is required';
+    const price = parseFloat(formData.price);
+    if (!formData.price || isNaN(price) || price <= 0) e.price = 'Enter a valid price';
+    if (!formData.city) e.city = 'City is required';
+    if (!formData.suburb.trim()) e.suburb = 'Suburb is required';
+    if (!formData.contact_phone.trim() || !isValidEswatiniPhone(formData.contact_phone))
+      e.contact_phone = 'Valid Eswatini phone required';
+    if (formData.asset_category === 'land') {
+      const ha = parseFloat(formData.land_size_ha);
+      if (!formData.land_size_ha || isNaN(ha) || ha <= 0) e.land_size_ha = 'Land size (ha) required';
+    }
+    if (formData.asset_category === 'commercial') {
+      const area = parseFloat(formData.floor_area_sqm);
+      if (!formData.floor_area_sqm || isNaN(area) || area <= 0) e.floor_area_sqm = 'Floor area required';
+    }
+    if (photos.length < MIN_PHOTOS_PUBLISH) {
+      e.photos = 'At least one photo is required to publish';
+    }
+    return e;
+  };
+
+  const jumpToFirstError = (errs: Record<string, string>) => {
+    const keys = Object.keys(errs);
+    if (!keys.length) return;
+    const step = Math.min(...keys.map(fieldStep));
+    setCurrentStep(step);
+    toast.error(errs[keys[0]]);
+  };
+
   const handleNext = useCallback(() => {
     if (currentStep === 1) {
-      if (!formData.asset_category || !formData.listing_intent || !formData.property_subtype) {
-        setError('Select category, how it is offered, and subtype');
+      const e: Record<string, string> = {};
+      if (!formData.asset_category) e.asset_category = 'Choose a category';
+      if (!formData.listing_intent) e.listing_intent = 'Sale or rent?';
+      if (!formData.property_subtype) e.property_subtype = 'Choose a subtype';
+      if (Object.keys(e).length) {
+        setFieldErrors(e);
+        setError(Object.values(e)[0]);
         return;
       }
-      setError(null);
     }
+    setError(null);
+    setFieldErrors({});
     if (currentStep < TOTAL_STEPS) setCurrentStep((p) => p + 1);
   }, [currentStep, formData.asset_category, formData.listing_intent, formData.property_subtype]);
-
-  const handlePrevious = useCallback(() => {
-    if (currentStep > 1) setCurrentStep((p) => p - 1);
-  }, [currentStep]);
 
   const handleAmenityToggle = useCallback((amenity: string) => {
     setFormData((prev) => ({
@@ -148,30 +224,7 @@ export default function AddPropertyPage() {
 
   const setCategory = (cat: AssetCategory) => {
     setFormData((p) => ({ ...p, asset_category: cat, property_subtype: '', amenities: [] }));
-  };
-
-  const validateForPublish = (): string[] => {
-    const errors: string[] = [];
-    if (!formData.asset_category) errors.push('Category');
-    if (!formData.listing_intent) errors.push('Intent');
-    if (!formData.property_subtype) errors.push('Subtype');
-    if (!formData.title.trim()) errors.push('Title');
-    if (!formData.description.trim()) errors.push('Description');
-    const price = parseFloat(formData.price);
-    if (!formData.price || isNaN(price) || price <= 0) errors.push('Valid price');
-    if (!formData.city) errors.push('City');
-    if (!formData.suburb.trim()) errors.push('Suburb');
-    if (!formData.contact_phone.trim() || !isValidEswatiniPhone(formData.contact_phone))
-      errors.push('Valid Eswatini phone');
-    if (formData.asset_category === 'land') {
-      const ha = parseFloat(formData.land_size_ha);
-      if (!formData.land_size_ha || isNaN(ha) || ha <= 0) errors.push('Land size (ha)');
-    }
-    if (formData.asset_category === 'commercial') {
-      const area = parseFloat(formData.floor_area_sqm);
-      if (!formData.floor_area_sqm || isNaN(area) || area <= 0) errors.push('Floor area (m²)');
-    }
-    return errors;
+    setFieldErrors((fe) => ({ ...fe, asset_category: '' }));
   };
 
   const uploadPhotos = async (propertyId: string): Promise<void> => {
@@ -211,11 +264,8 @@ export default function AddPropertyPage() {
         return;
       }
       if (photos.length > 0) {
-        try {
-          await uploadPhotos(result.id);
-        } catch {
-          toast.warning('Draft saved, but some photos failed');
-        }
+        try { await uploadPhotos(result.id); }
+        catch { toast.warning('Draft saved, but some photos failed'); }
       }
       toast.success('Draft saved');
       router.push('/dashboard/landlord');
@@ -236,6 +286,7 @@ export default function AddPropertyPage() {
     if (!isPhoneVerified) {
       setPhoneDialogOpen(true);
       setError('Verify your phone once, then publish');
+      setCurrentStep(5);
       return;
     }
     if (!isLandlordVerified) {
@@ -244,13 +295,15 @@ export default function AddPropertyPage() {
     }
 
     const errs = validateForPublish();
-    if (errs.length) {
-      setError(errs.join('. '));
-      toast.error('Complete required fields');
+    if (Object.keys(errs).length) {
+      setFieldErrors(errs);
+      setError(Object.values(errs)[0]);
+      jumpToFirstError(errs);
       return;
     }
 
     setError(null);
+    setFieldErrors({});
     setLoading(true);
     try {
       const result = await saveListingRow({
@@ -264,17 +317,12 @@ export default function AddPropertyPage() {
         toast.error(result.error);
         return;
       }
-      if (photos.length > 0) {
-        try {
-          await uploadPhotos(result.id);
-        } catch {
-          toast.warning('Submitted, but some photos failed');
-        }
-      }
+      try { await uploadPhotos(result.id); }
+      catch { toast.warning('Submitted, but some photos failed'); }
       toast.success('Submitted for review');
       router.push('/dashboard/landlord');
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Submit failed';
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Submit failed';
       setError(msg);
       toast.error(msg);
     } finally {
@@ -284,74 +332,70 @@ export default function AddPropertyPage() {
   };
 
   const priceLabel = formData.listing_intent === 'sale' ? 'Sale price (E) *' : 'Monthly rent (E) *';
-  const stepLabels = ['Category', 'Basics', 'Location', 'Details', 'Photos'];
+  const inputErr = (key: string) =>
+    fieldErrors[key] ? 'border-destructive focus-visible:ring-destructive' : '';
 
   const renderDetails = () => {
     if (isLand) {
       return (
-        <div className="space-y-4">
-          <h2 className="text-xl font-semibold">Land details</h2>
-          <div>
-            <Label>Size (hectares) *</Label>
+        <div className="space-y-5">
+          <h2 className="text-xl font-semibold tracking-tight">Land details</h2>
+          <Field label="Size (hectares) *" error={fieldErrors.land_size_ha}>
             <Input type="number" min="0.01" step="0.01" value={formData.land_size_ha}
+              className={inputErr('land_size_ha')}
               onChange={(e) => setFormData((p) => ({ ...p, land_size_ha: e.target.value }))} />
-          </div>
-          <div className="flex items-center space-x-2">
+          </Field>
+          <div className="flex items-center gap-2 pt-1">
             <Checkbox id="fenced" checked={formData.is_fenced}
               onCheckedChange={(c) => setFormData((p) => ({ ...p, is_fenced: !!c }))} />
             <Label htmlFor="fenced">Fenced</Label>
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-3">
             {([['has_road_access', 'Road access'], ['has_water', 'Water'], ['has_electricity', 'Electricity'], ['has_sewer', 'Sewer']] as const).map(([k, l]) => (
-              <div key={k} className="flex items-center space-x-2">
+              <div key={k} className="flex items-center gap-2">
                 <Checkbox id={k} checked={formData[k]} onCheckedChange={(c) => setFormData((p) => ({ ...p, [k]: !!c }))} />
                 <Label htmlFor={k}>{l}</Label>
               </div>
             ))}
           </div>
-          <div>
-            <Label>Land features</Label>
-            <div className="grid grid-cols-2 gap-2 mt-2">
+          <Field label="Features people look for">
+            <div className="grid grid-cols-2 gap-2.5 pt-1">
               {LAND_AMENITIES.map((a) => (
-                <div key={a} className="flex items-center space-x-2">
+                <div key={a} className="flex items-center gap-2">
                   <Checkbox id={a} checked={formData.amenities.includes(a)} onCheckedChange={() => handleAmenityToggle(a)} />
-                  <Label htmlFor={a} className="text-sm">{a}</Label>
+                  <Label htmlFor={a} className="text-sm font-normal">{a}</Label>
                 </div>
               ))}
             </div>
-          </div>
-          <div>
-            <Label>Zoning notes</Label>
+          </Field>
+          <Field label="Zoning notes">
             <Textarea rows={2} value={formData.zoning_notes}
               onChange={(e) => setFormData((p) => ({ ...p, zoning_notes: e.target.value }))} />
-          </div>
+          </Field>
         </div>
       );
     }
 
     if (isCommercial) {
       return (
-        <div className="space-y-4">
-          <h2 className="text-xl font-semibold">Commercial details</h2>
-          <div>
-            <Label>Floor area (m²) *</Label>
+        <div className="space-y-5">
+          <h2 className="text-xl font-semibold tracking-tight">Commercial details</h2>
+          <Field label="Floor area (m²) *" error={fieldErrors.floor_area_sqm}>
             <Input type="number" min="1" value={formData.floor_area_sqm}
+              className={inputErr('floor_area_sqm')}
               onChange={(e) => setFormData((p) => ({ ...p, floor_area_sqm: e.target.value }))} />
-          </div>
+          </Field>
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label>Floors</Label>
+            <Field label="Floors">
               <Input type="number" min="0" value={formData.floors}
                 onChange={(e) => setFormData((p) => ({ ...p, floors: e.target.value }))} />
-            </div>
-            <div>
-              <Label>Parking bays</Label>
+            </Field>
+            <Field label="Parking bays">
               <Input type="number" min="0" value={formData.parking_bays}
                 onChange={(e) => setFormData((p) => ({ ...p, parking_bays: e.target.value }))} />
-            </div>
+            </Field>
           </div>
-          <div>
-            <Label>Fit-out</Label>
+          <Field label="Fit-out">
             <Select value={formData.fit_out} onValueChange={(v) => setFormData((p) => ({ ...p, fit_out: v as FitOut }))}>
               <SelectTrigger><SelectValue placeholder="Optional" /></SelectTrigger>
               <SelectContent>
@@ -360,80 +404,74 @@ export default function AddPropertyPage() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
+          </Field>
           <div className="flex flex-wrap gap-4">
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center gap-2">
               <Checkbox id="loading" checked={formData.has_loading_bay}
                 onCheckedChange={(c) => setFormData((p) => ({ ...p, has_loading_bay: !!c }))} />
               <Label htmlFor="loading">Loading bay</Label>
             </div>
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center gap-2">
               <Checkbox id="frontage" checked={formData.has_street_frontage}
                 onCheckedChange={(c) => setFormData((p) => ({ ...p, has_street_frontage: !!c }))} />
               <Label htmlFor="frontage">Street frontage</Label>
             </div>
           </div>
-          <div>
-            <Label>Power notes</Label>
+          <Field label="Power notes">
             <Input value={formData.power_notes} placeholder="e.g. 3-phase"
               onChange={(e) => setFormData((p) => ({ ...p, power_notes: e.target.value }))} />
-          </div>
-          <div>
-            <Label>Amenities</Label>
-            <div className="grid grid-cols-2 gap-2 mt-2">
+          </Field>
+          <Field label="Amenities">
+            <div className="grid grid-cols-2 gap-2.5 pt-1">
               {COMMERCIAL_AMENITIES.map((a) => (
-                <div key={a} className="flex items-center space-x-2">
+                <div key={a} className="flex items-center gap-2">
                   <Checkbox id={a} checked={formData.amenities.includes(a)} onCheckedChange={() => handleAmenityToggle(a)} />
-                  <Label htmlFor={a} className="text-sm">{a}</Label>
+                  <Label htmlFor={a} className="text-sm font-normal">{a}</Label>
                 </div>
               ))}
             </div>
-          </div>
+          </Field>
         </div>
       );
     }
 
     return (
-      <div className="space-y-4">
-        <h2 className="text-xl font-semibold">Property details</h2>
+      <div className="space-y-5">
+        <h2 className="text-xl font-semibold tracking-tight">Property details</h2>
         <div className="grid grid-cols-2 gap-4">
-          <div>
-            <Label>Bedrooms</Label>
+          <Field label="Bedrooms">
             <Select value={formData.bedrooms} onValueChange={(v) => setFormData((p) => ({ ...p, bedrooms: v }))}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>{ROOM_OPTIONS.map((n) => <SelectItem key={n} value={n}>{n === '0' ? 'Studio' : n}</SelectItem>)}</SelectContent>
             </Select>
-          </div>
-          <div>
-            <Label>Bathrooms</Label>
+          </Field>
+          <Field label="Bathrooms">
             <Select value={formData.bathrooms} onValueChange={(v) => setFormData((p) => ({ ...p, bathrooms: v }))}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>{BATH_OPTIONS.map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}</SelectContent>
             </Select>
-          </div>
+          </Field>
         </div>
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center gap-2">
           <Checkbox id="furn" checked={formData.is_furnished}
             onCheckedChange={(c) => setFormData((p) => ({ ...p, is_furnished: !!c }))} />
           <Label htmlFor="furn">Furnished</Label>
         </div>
-        <div>
-          <Label>Amenities</Label>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mt-2">
+        <Field label="What seekers care about" hint="Common on local listings — keep it honest">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
             {RESIDENTIAL_AMENITIES.map((a) => (
-              <div key={a} className="flex items-center space-x-2">
+              <div key={a} className="flex items-center gap-2">
                 <Checkbox id={a} checked={formData.amenities.includes(a)} onCheckedChange={() => handleAmenityToggle(a)} />
-                <Label htmlFor={a} className="text-sm">{a}</Label>
+                <Label htmlFor={a} className="text-sm font-normal">{a}</Label>
               </div>
             ))}
           </div>
-        </div>
+        </Field>
         {formData.listing_intent === 'long_rent' && (
-          <div>
-            <Label>Lease terms</Label>
+          <Field label="Lease terms">
             <Textarea rows={2} value={formData.lease_terms}
               onChange={(e) => setFormData((p) => ({ ...p, lease_terms: e.target.value }))} />
-          </div>
+          </Field>
         )}
       </div>
     );
@@ -444,7 +482,7 @@ export default function AddPropertyPage() {
       case 1:
         return (
           <div className="space-y-6">
-            <h2 className="text-xl font-semibold">What are you listing?</h2>
+            <h2 className="text-xl font-semibold tracking-tight">What are you listing?</h2>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {([
                 ['residential', Home, 'House, flat, backrooms'],
@@ -452,20 +490,22 @@ export default function AddPropertyPage() {
                 ['commercial', Building2, 'Office, retail, warehouse'],
               ] as const).map(([cat, Icon, desc]) => (
                 <button key={cat} type="button" onClick={() => setCategory(cat)}
-                  className={`rounded-xl border-2 p-4 text-left transition ${
-                    formData.asset_category === cat ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
-                  }`}>
+                  className={cn(
+                    'rounded-xl border-2 p-4 text-left transition',
+                    formData.asset_category === cat ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50',
+                    fieldErrors.asset_category && !formData.asset_category && 'border-destructive'
+                  )}>
                   <Icon className="h-6 w-6 mb-2 text-primary" />
                   <p className="font-semibold">{ASSET_CATEGORY_LABELS[cat]}</p>
                   <p className="text-xs text-muted-foreground mt-1">{desc}</p>
                 </button>
               ))}
             </div>
+            {fieldErrors.asset_category && <p className="text-xs text-destructive">{fieldErrors.asset_category}</p>}
             {formData.asset_category && (
               <>
-                <div>
-                  <Label className="mb-2 block">How is it offered? *</Label>
-                  <div className="grid grid-cols-2 gap-2">
+                <Field label="How is it offered? *" error={fieldErrors.listing_intent}>
+                  <div className="grid grid-cols-2 gap-2 pt-0.5">
                     {(['sale', 'long_rent'] as ListingIntent[]).map((intent) => (
                       <Button key={intent} type="button" className="h-12"
                         variant={formData.listing_intent === intent ? 'default' : 'outline'}
@@ -474,12 +514,11 @@ export default function AddPropertyPage() {
                       </Button>
                     ))}
                   </div>
-                </div>
-                <div>
-                  <Label className="mb-2 block">Subtype *</Label>
+                </Field>
+                <Field label="Subtype *" error={fieldErrors.property_subtype}>
                   <Select value={formData.property_subtype}
                     onValueChange={(v) => setFormData((p) => ({ ...p, property_subtype: v }))}>
-                    <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
+                    <SelectTrigger className={inputErr('property_subtype')}><SelectValue placeholder="Select type" /></SelectTrigger>
                     <SelectContent>
                       {isResidential && RESIDENTIAL_SUBTYPES.map((s) => (
                         <SelectItem key={s} value={s}>{RESIDENTIAL_SUBTYPE_LABELS[s as ResidentialSubtype]}</SelectItem>
@@ -492,69 +531,79 @@ export default function AddPropertyPage() {
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
+                </Field>
               </>
             )}
           </div>
         );
       case 2:
         return (
-          <div className="space-y-4">
-            <h2 className="text-xl font-semibold">Basic information</h2>
+          <div className="space-y-5">
+            <h2 className="text-xl font-semibold tracking-tight">Basic information</h2>
             <div className="flex gap-2 flex-wrap">
               {formData.asset_category && <Badge variant="outline">{ASSET_CATEGORY_LABELS[formData.asset_category]}</Badge>}
               {formData.listing_intent && <Badge variant="outline">{LISTING_INTENT_LABELS[formData.listing_intent]}</Badge>}
             </div>
-            <div><Label>Title *</Label><Input value={formData.title} onChange={(e) => setFormData((p) => ({ ...p, title: e.target.value }))} /></div>
-            <div>
-              <Label>Tenure *</Label>
+            <Field label="Title *" error={fieldErrors.title}>
+              <Input value={formData.title} className={inputErr('title')}
+                onChange={(e) => setFormData((p) => ({ ...p, title: e.target.value }))} />
+            </Field>
+            <Field label="Tenure *">
               <Select value={formData.tenure_type} onValueChange={(v) => setFormData((p) => ({ ...p, tenure_type: v as TenureType }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>{TENURE_TYPES.map((t) => <SelectItem key={t} value={t}>{TENURE_CONFIG[t].label}</SelectItem>)}</SelectContent>
               </Select>
               <div className="mt-2"><TenureBadge tenure={formData.tenure_type} size="md" /></div>
-            </div>
-            <div><Label>{priceLabel}</Label><Input type="number" min="1" value={formData.price} onChange={(e) => setFormData((p) => ({ ...p, price: e.target.value }))} /></div>
-            <div><Label>Description *</Label><Textarea rows={5} value={formData.description} onChange={(e) => setFormData((p) => ({ ...p, description: e.target.value }))} /></div>
+            </Field>
+            <Field label={priceLabel} error={fieldErrors.price}>
+              <Input type="number" min="1" value={formData.price} className={inputErr('price')}
+                onChange={(e) => setFormData((p) => ({ ...p, price: e.target.value }))} />
+            </Field>
+            <Field label="Description *" error={fieldErrors.description}>
+              <Textarea rows={5} value={formData.description} className={inputErr('description')}
+                onChange={(e) => setFormData((p) => ({ ...p, description: e.target.value }))} />
+            </Field>
           </div>
         );
       case 3:
         return (
-          <div className="space-y-4">
-            <h2 className="text-xl font-semibold">Location</h2>
-            <div>
-              <Label>City *</Label>
+          <div className="space-y-5">
+            <h2 className="text-xl font-semibold tracking-tight">Location</h2>
+            <Field label="City *" error={fieldErrors.city}>
               <Select value={formData.city} onValueChange={(v) => setFormData((p) => ({ ...p, city: v }))}>
-                <SelectTrigger><SelectValue placeholder="City" /></SelectTrigger>
+                <SelectTrigger className={inputErr('city')}><SelectValue placeholder="City" /></SelectTrigger>
                 <SelectContent>{ESWATINI_CITIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
               </Select>
-            </div>
-            <div><Label>Suburb *</Label><Input value={formData.suburb} onChange={(e) => setFormData((p) => ({ ...p, suburb: e.target.value }))} /></div>
-            <div><Label>Address (optional)</Label><Input value={formData.address} onChange={(e) => setFormData((p) => ({ ...p, address: e.target.value }))} /></div>
+            </Field>
+            <Field label="Suburb *" error={fieldErrors.suburb}>
+              <Input value={formData.suburb} className={inputErr('suburb')}
+                onChange={(e) => setFormData((p) => ({ ...p, suburb: e.target.value }))} />
+            </Field>
+            <Field label="Address (optional)">
+              <Input value={formData.address}
+                onChange={(e) => setFormData((p) => ({ ...p, address: e.target.value }))} />
+            </Field>
           </div>
         );
       case 4:
         return renderDetails();
       case 5:
         return (
-          <div className="space-y-4">
-            <h2 className="text-xl font-semibold">Photos & contact</h2>
-            <div className="grid grid-cols-3 md:grid-cols-5 gap-3">
-              {photoPreviews.map((preview, i) => (
-                <div key={i} className="relative aspect-square">
-                  <Image src={preview} alt="" fill className="object-cover rounded-lg" />
-                  <Button type="button" variant="destructive" size="icon" className="absolute -top-2 -right-2 h-6 w-6" onClick={() => removePhoto(i)}><X className="h-3 w-3" /></Button>
-                </div>
-              ))}
-              {photos.length < MAX_PHOTOS && (
-                <label className="aspect-square border-2 border-dashed rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-primary/50 transition-colors">
-                  {compressing ? <Loader2 className="h-5 w-5 animate-spin" /> : <Upload className="h-5 w-5 mb-1" />}
-                  <span className="text-xs">{compressing ? 'Optimizing…' : 'Upload'}</span>
-                  <input type="file" accept="image/*" multiple className="hidden" onChange={handlePhotoUpload} disabled={compressing} />
-                </label>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground">Photos are compressed on your device for faster upload.</p>
+          <div className="space-y-5">
+            <h2 className="text-xl font-semibold tracking-tight">Photos & contact</h2>
+            <Field label="Photos *" error={fieldErrors.photos} hint="At least one photo required to publish. First = cover.">
+              <PhotoGrid
+                previews={photoPreviews}
+                max={MAX_PHOTOS}
+                compressing={compressing}
+                onFileInput={handlePhotoUpload}
+                onDrop={handleDrop}
+                onRemove={removePhoto}
+                onMove={movePhoto}
+                onSetCover={setAsCover}
+                error={!!fieldErrors.photos}
+              />
+            </Field>
             {uploadProgress && <Progress value={(uploadProgress.current / uploadProgress.total) * 100} />}
             <ContactPhoneFields
               contactPhone={formData.contact_phone}
@@ -564,6 +613,9 @@ export default function AddPropertyPage() {
               isPhoneVerified={isPhoneVerified}
               onRequestVerify={() => setPhoneDialogOpen(true)}
             />
+            {fieldErrors.contact_phone && (
+              <p className="text-xs text-destructive">{fieldErrors.contact_phone}</p>
+            )}
           </div>
         );
       default:
@@ -578,7 +630,9 @@ export default function AddPropertyPage() {
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-3xl">
-      <Button variant="ghost" asChild className="mb-4"><Link href="/dashboard/landlord"><ChevronLeft className="h-4 w-4 mr-1" />Back</Link></Button>
+      <Button variant="ghost" asChild className="mb-4">
+        <Link href="/dashboard/landlord"><ChevronLeft className="h-4 w-4 mr-1" />Back</Link>
+      </Button>
       <h1 className="text-3xl font-bold mb-1 tracking-tight">Add listing</h1>
       <p className="text-muted-foreground mb-6">Residential, land, or commercial</p>
 
@@ -586,27 +640,52 @@ export default function AddPropertyPage() {
         <Card className="border-amber-500/30 bg-amber-500/10 mb-6">
           <CardContent className="p-4 flex gap-3">
             {isLandlordPending ? <Clock className="h-6 w-6 text-amber-600" /> : <AlertCircle className="h-6 w-6 text-red-600" />}
-            <p className="text-sm">Drafts work anytime. Publish needs account verification + phone.</p>
+            <p className="text-sm">Drafts work anytime. Publish needs verification, phone, and at least one photo.</p>
           </CardContent>
         </Card>
       )}
 
+      {/* Clickable steps */}
       <div className="mb-6 flex justify-between gap-1">
-        {stepLabels.map((label, i) => (
-          <div key={label} className={`flex-1 text-center text-xs ${i + 1 <= currentStep ? 'text-primary' : 'text-muted-foreground'}`}>
-            <div className={`w-8 h-8 mx-auto rounded-full flex items-center justify-center mb-1 ${
-              i + 1 < currentStep ? 'bg-primary text-primary-foreground' : i + 1 === currentStep ? 'border-2 border-primary' : 'border-2 border-muted'
-            }`}>{i + 1}</div>
-            <span className="hidden sm:block">{label}</span>
-          </div>
-        ))}
+        {STEP_LABELS.map((label, i) => {
+          const step = i + 1;
+          const active = step === currentStep;
+          const done = step < currentStep;
+          return (
+            <button
+              key={label}
+              type="button"
+              onClick={() => { setCurrentStep(step); setError(null); }}
+              className={cn(
+                'flex-1 text-center text-xs rounded-lg py-1 transition-colors',
+                active ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              <div className={cn(
+                'w-8 h-8 mx-auto rounded-full flex items-center justify-center mb-1 text-sm font-medium',
+                done && 'bg-primary text-primary-foreground',
+                active && 'border-2 border-primary',
+                !done && !active && 'border-2 border-muted'
+              )}>
+                {step}
+              </div>
+              <span className="hidden sm:block">{label}</span>
+            </button>
+          );
+        })}
       </div>
 
       <form onSubmit={handleSubmit}>
-        {error && <Alert variant="destructive" className="mb-4"><AlertDescription>{error}</AlertDescription></Alert>}
-        <Card><CardContent className="p-6">{renderStep()}</CardContent></Card>
+        {error && (
+          <Alert variant="destructive" className="mb-4">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        <Card>
+          <CardContent className="p-6 sm:p-8">{renderStep()}</CardContent>
+        </Card>
         <div className="flex justify-between mt-6 gap-2 flex-wrap">
-          <Button type="button" variant="outline" onClick={handlePrevious} disabled={currentStep === 1}>
+          <Button type="button" variant="outline" onClick={() => setCurrentStep((s) => Math.max(1, s - 1))} disabled={currentStep === 1}>
             <ChevronLeft className="h-4 w-4 mr-1" />Previous
           </Button>
           <div className="flex gap-2 flex-wrap">
@@ -615,7 +694,9 @@ export default function AddPropertyPage() {
               Save draft
             </Button>
             {currentStep < TOTAL_STEPS ? (
-              <Button type="button" onClick={handleNext}>Next <ChevronRight className="h-4 w-4 ml-1" /></Button>
+              <Button type="button" onClick={handleNext}>
+                Next <ChevronRight className="h-4 w-4 ml-1" />
+              </Button>
             ) : isLandlordVerified ? (
               <Button type="submit" disabled={loading}>
                 {loading && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
