@@ -9,10 +9,12 @@ import {
   formatPricePeriod,
   inferAssetCategory,
   inferListingIntent,
+  subtypeLabel,
+  ASSET_CATEGORY_LABELS,
 } from '@/types/property';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
-import { MapPin, Bed, Bath, Heart, Eye, CheckCircle, Clock, Ruler } from 'lucide-react';
+import { MapPin, Bed, Bath, Heart, Eye, CheckCircle, Clock, Ruler, Building2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -48,8 +50,11 @@ function SpecsRow({ property }: { property: Property }) {
             {property.is_fenced ? 'Fenced' : 'Not fenced'}
           </Badge>
         )}
+        <Badge variant="secondary" className="text-xs">
+          {ASSET_CATEGORY_LABELS.land}
+        </Badge>
         {intent === 'sale' && (
-          <Badge variant="secondary" className="text-xs">
+          <Badge variant="outline" className="text-xs">
             For sale
           </Badge>
         )}
@@ -57,8 +62,30 @@ function SpecsRow({ property }: { property: Property }) {
     );
   }
 
+  if (category === 'commercial') {
+    return (
+      <div className="flex items-center gap-3 text-sm text-muted-foreground flex-wrap">
+        {property.floor_area_sqm != null && (
+          <span className="flex items-center gap-1">
+            <Building2 className="h-4 w-4" />
+            {property.floor_area_sqm} m²
+          </span>
+        )}
+        <Badge variant="outline" className="text-xs">
+          {subtypeLabel(property.property_subtype || property.property_type)}
+        </Badge>
+        {property.parking_bays != null && property.parking_bays > 0 && (
+          <span className="text-xs">{property.parking_bays} parking</span>
+        )}
+        <Badge variant="secondary" className="text-xs">
+          Commercial
+        </Badge>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex items-center gap-4 text-sm text-muted-foreground">
+    <div className="flex items-center gap-4 text-sm text-muted-foreground flex-wrap">
       <span className="flex items-center gap-1">
         <Bed className="h-4 w-4" />
         {property.bedrooms ?? '—'}
@@ -146,127 +173,50 @@ export function PropertyCard({ property, viewMode = 'grid' }: PropertyCardProps)
     }
   };
 
-  if (viewMode === 'list') {
-    return (
-      <Link href={`/properties/${property.id}`}>
-        <Card className="overflow-hidden hover:shadow-lg transition-all duration-300 group">
-          <div className="flex flex-col sm:flex-row">
-            <div className="relative w-full sm:w-48 h-48 sm:h-auto bg-muted shrink-0">
-              {primaryPhoto ? (
-                <Image
-                  src={primaryPhoto.photo_url}
-                  alt={property.title}
-                  fill
-                  className="object-cover group-hover:scale-105 transition-transform duration-300"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center bg-muted">
-                  <span className="text-muted-foreground">No photo</span>
-                </div>
-              )}
-              <div className="absolute top-2 left-2 flex gap-1 flex-wrap">
-                {property.landlord?.is_verified && (
-                  <Badge className="bg-green-600 hover:bg-green-700 text-white">
-                    <CheckCircle className="h-3 w-3 mr-1" />
-                    Verified
-                  </Badge>
-                )}
-                <TenureBadge tenure={property.tenure_type} />
-                {property.status === 'active' && <Badge variant="default">Available</Badge>}
-                {(property.status === 'rented' || property.status === 'taken') && (
-                  <Badge variant="secondary">Taken</Badge>
-                )}
-              </div>
-              <button
-                onClick={handleSave}
-                disabled={isSaving}
-                className="absolute top-2 right-2 p-2 rounded-full bg-background/90 hover:bg-background shadow-md"
-              >
-                <Heart
-                  className={`h-4 w-4 ${isSaved ? 'fill-red-500 text-red-500' : 'text-muted-foreground'}`}
-                />
-              </button>
+  const cardInner = (list: boolean) => (
+    <Card className={`overflow-hidden hover:shadow-xl transition-all duration-300 group ${list ? '' : 'h-full'}`}>
+      <div className={list ? 'flex flex-col sm:flex-row' : ''}>
+        <div className={`relative ${list ? 'w-full sm:w-48 h-48 sm:h-auto' : 'h-48'} bg-muted shrink-0`}>
+          {primaryPhoto ? (
+            <Image
+              src={primaryPhoto.photo_url}
+              alt={property.title}
+              fill
+              className="object-cover group-hover:scale-105 transition-transform duration-300"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center bg-muted">
+              <span className="text-muted-foreground">No photo</span>
             </div>
-            <CardContent className="flex-1 p-4 flex flex-col justify-between">
-              <div>
-                <div className="flex justify-between items-start gap-2">
-                  <h3 className="font-semibold text-lg line-clamp-1 group-hover:text-primary">
-                    {property.title}
-                  </h3>
-                  <PriceLabel property={property} />
-                </div>
-                <div className="flex items-center text-muted-foreground text-sm mt-1">
-                  <MapPin className="h-3 w-3 mr-1 shrink-0" />
-                  <span className="truncate">
-                    {property.location_suburb}, {property.location_city}
-                  </span>
-                </div>
-                <div className="mt-2">
-                  <SpecsRow property={property} />
-                </div>
-                <p className="text-sm text-muted-foreground mt-2 line-clamp-2">{property.description}</p>
-              </div>
-              <div className="flex items-center justify-between mt-3 pt-3 border-t text-xs text-muted-foreground">
-                <span className="flex items-center gap-1">
-                  <Eye className="h-3 w-3" />
-                  {property.views || 0} views
-                </span>
-                <span className="flex items-center gap-1">
-                  <Clock className="h-3 w-3" />
-                  {new Date(property.created_at).toLocaleDateString()}
-                </span>
-              </div>
-            </CardContent>
-          </div>
-        </Card>
-      </Link>
-    );
-  }
-
-  return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
-      <Link href={`/properties/${property.id}`}>
-        <Card className="overflow-hidden hover:shadow-xl transition-all duration-300 group h-full">
-          <div className="relative h-48 bg-muted">
-            {primaryPhoto ? (
-              <Image
-                src={primaryPhoto.photo_url}
-                alt={property.title}
-                fill
-                className="object-cover group-hover:scale-105 transition-transform duration-300"
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center bg-muted">
-                <span className="text-muted-foreground">No photo</span>
-              </div>
+          )}
+          <div className="absolute top-2 left-2 flex gap-1 flex-wrap">
+            {property.landlord?.is_verified && (
+              <Badge className="bg-green-600 hover:bg-green-700 text-white">
+                <CheckCircle className="h-3 w-3 mr-1" />
+                Verified
+              </Badge>
             )}
-            <div className="absolute top-2 left-2 flex gap-1 flex-wrap">
-              {property.landlord?.is_verified && (
-                <Badge className="bg-green-600 hover:bg-green-700 text-white">
-                  <CheckCircle className="h-3 w-3 mr-1" />
-                  Verified
-                </Badge>
-              )}
-              <TenureBadge tenure={property.tenure_type} />
-              {property.status === 'active' && <Badge variant="default">Available</Badge>}
-              {(property.status === 'rented' || property.status === 'taken') && (
-                <Badge variant="secondary">Taken</Badge>
-              )}
-              {property.is_featured && (
-                <Badge className="bg-amber-500 hover:bg-amber-600 text-white">Featured</Badge>
-              )}
-            </div>
-            <button
-              onClick={handleSave}
-              disabled={isSaving}
-              className="absolute top-2 right-2 p-2 rounded-full bg-background/90 hover:bg-background shadow-md"
-            >
-              <Heart
-                className={`h-4 w-4 ${isSaved ? 'fill-red-500 text-red-500' : 'text-muted-foreground'}`}
-              />
-            </button>
+            <TenureBadge tenure={property.tenure_type} />
+            {property.status === 'active' && <Badge variant="default">Available</Badge>}
+            {(property.status === 'rented' || property.status === 'taken') && (
+              <Badge variant="secondary">Taken</Badge>
+            )}
+            {!list && property.is_featured && (
+              <Badge className="bg-amber-500 hover:bg-amber-600 text-white">Featured</Badge>
+            )}
           </div>
-          <CardContent className="p-4">
+          <button
+            onClick={handleSave}
+            disabled={isSaving}
+            className="absolute top-2 right-2 p-2 rounded-full bg-background/90 hover:bg-background shadow-md"
+          >
+            <Heart
+              className={`h-4 w-4 ${isSaved ? 'fill-red-500 text-red-500' : 'text-muted-foreground'}`}
+            />
+          </button>
+        </div>
+        <CardContent className={`p-4 ${list ? 'flex-1 flex flex-col justify-between' : ''}`}>
+          <div>
             <div className="flex justify-between items-start gap-2 mb-1">
               <h3 className="font-semibold text-lg line-clamp-1 group-hover:text-primary">
                 {property.title}
@@ -280,19 +230,32 @@ export function PropertyCard({ property, viewMode = 'grid' }: PropertyCardProps)
               </span>
             </div>
             <SpecsRow property={property} />
-            <div className="flex items-center justify-between mt-3 pt-3 border-t text-xs text-muted-foreground">
-              <span className="flex items-center gap-1">
-                <Eye className="h-3 w-3" />
-                {property.views || 0} views
-              </span>
-              <span className="flex items-center gap-1">
-                <Clock className="h-3 w-3" />
-                {new Date(property.created_at).toLocaleDateString()}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-      </Link>
+            {list && (
+              <p className="text-sm text-muted-foreground mt-2 line-clamp-2">{property.description}</p>
+            )}
+          </div>
+          <div className="flex items-center justify-between mt-3 pt-3 border-t text-xs text-muted-foreground">
+            <span className="flex items-center gap-1">
+              <Eye className="h-3 w-3" />
+              {property.views || 0} views
+            </span>
+            <span className="flex items-center gap-1">
+              <Clock className="h-3 w-3" />
+              {new Date(property.created_at).toLocaleDateString()}
+            </span>
+          </div>
+        </CardContent>
+      </div>
+    </Card>
+  );
+
+  if (viewMode === 'list') {
+    return <Link href={`/properties/${property.id}`}>{cardInner(true)}</Link>;
+  }
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
+      <Link href={`/properties/${property.id}`}>{cardInner(false)}</Link>
     </motion.div>
   );
 }
