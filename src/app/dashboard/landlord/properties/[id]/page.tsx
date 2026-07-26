@@ -1,32 +1,20 @@
 // src/app/dashboard/landlord/properties/[id]/page.tsx
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import { Property, PropertyPhoto } from '@/types/property';
+import { Property, PropertyPhoto, inferAssetCategory, formatPricePeriod, inferListingIntent } from '@/types/property';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import {
-  ArrowLeft,
-  Edit,
-  Eye,
-  Trash2,
-  Calendar,
-  Loader2,
-  MapPin,
-  CheckCircle,
-  XCircle,
-  BarChart,
-  Camera,
-  AlertCircle,
-  Clock,
-  FileText,
+  ArrowLeft, Edit, Eye, Trash2, Calendar, Loader2, MapPin, CheckCircle,
+  XCircle, BarChart, Camera, AlertCircle, Clock, FileText,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useLandlordProperties } from '@/hooks/useLandlordProperties';
@@ -35,21 +23,25 @@ interface PropertyWithPhotos extends Property {
   photos: PropertyPhoto[];
 }
 
-// Status transition rules
 const STATUS_TRANSITIONS: Record<string, string[]> = {
-  'draft': ['pending'],
-  'pending': ['active', 'rejected'],
-  'active': ['rented', 'pending'],
-  'rented': ['active'],
-  'rejected': ['pending'],
+  draft: ['pending'],
+  pending: ['active', 'rejected'],
+  active: ['rented', 'taken', 'pending'],
+  rented: ['active'],
+  taken: ['active'],
+  rejected: ['pending'],
 };
 
-const STATUS_CONFIG: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; className?: string }> = {
-  'draft': { label: '📄 Draft', variant: 'outline', className: 'border-dashed' },
-  'pending': { label: '⏳ Pending Review', variant: 'secondary' },
-  'active': { label: '✓ Active', variant: 'default', className: 'bg-green-600' },
-  'rented': { label: '🏠 Rented', variant: 'outline' },
-  'rejected': { label: '✗ Rejected', variant: 'destructive' },
+const STATUS_CONFIG: Record<
+  string,
+  { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; className?: string }
+> = {
+  draft: { label: 'Draft', variant: 'outline', className: 'border-dashed' },
+  pending: { label: 'Pending review', variant: 'secondary' },
+  active: { label: 'Active', variant: 'default', className: 'bg-emerald-600 hover:bg-emerald-600 text-white' },
+  rented: { label: 'Rented', variant: 'outline' },
+  taken: { label: 'Taken', variant: 'outline' },
+  rejected: { label: 'Rejected', variant: 'destructive' },
 };
 
 export default function LandlordPropertyManagePage() {
@@ -65,121 +57,66 @@ export default function LandlordPropertyManagePage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
-  
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  const { deleteProperty, updateStatus } = useLandlordProperties({
-    autoFetch: false,
-    userId: user?.id,
-  });
+  const { deleteProperty } = useLandlordProperties({ autoFetch: false, userId: user?.id });
 
-  // Check authentication
   useEffect(() => {
-    if (!authLoading && !user) {
-      router.push('/auth/login');
-    }
+    if (!authLoading && !user) router.push('/auth/login');
   }, [user, authLoading, router]);
 
-  // Fetch property data with abort controller
   useEffect(() => {
     const fetchPropertyData = async () => {
       if (!user || !propertyId) return;
-
-      // Cancel previous request
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-      
+      if (abortControllerRef.current) abortControllerRef.current.abort();
       abortControllerRef.current = new AbortController();
 
       try {
         setLoading(true);
         setError(null);
-
         const { data: propertyData, error: propertyError } = await supabase
           .from('properties')
-          .select(
-            `
-            *,
-            photos:property_photos(
-              id,
-              property_id,
-              photo_url,
-              caption,
-              display_order,
-              created_at
-            )
-          `
-          )
+          .select(`*, photos:property_photos(id, property_id, photo_url, caption, display_order, created_at)`)
           .eq('id', propertyId)
           .eq('landlord_id', user.id)
           .order('display_order', { foreignTable: 'photos', ascending: true });
 
         if (propertyError) throw propertyError;
-
-        if (!propertyData || propertyData.length === 0) {
-          setError(
-            'Property not found or you do not have permission to view it'
-          );
+        if (!propertyData?.length) {
+          setError('Property not found or you do not have permission');
           setProperty(null);
           return;
         }
-
-        const property = propertyData[0] as PropertyWithPhotos;
-        setProperty(property);
+        setProperty(propertyData[0] as PropertyWithPhotos);
       } catch (err) {
-        // Ignore abort errors
-        if (err instanceof Error && err.name === 'AbortError') {
-          return;
-        }
-        const errorMessage =
-          err instanceof Error ? err.message : 'Failed to load property';
-        setError(errorMessage);
-        console.error('Error fetching property:', err);
+        if (err instanceof Error && err.name === 'AbortError') return;
+        setError(err instanceof Error ? err.message : 'Failed to load property');
       } finally {
         setLoading(false);
       }
     };
 
-    if (user && propertyId) {
-      fetchPropertyData();
-    }
-
-    return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-    };
+    if (user && propertyId) fetchPropertyData();
+    return () => { abortControllerRef.current?.abort(); };
   }, [user, propertyId]);
 
-  // Handle status change directly with Supabase
-  const handleStatusChange = async (newStatus: 'active' | 'rented' | 'pending' | 'rejected') => {
+  const handleStatusChange = async (newStatus: string) => {
     if (!property) return;
-
-    // Validate status transition
-    const allowedTransitions = STATUS_TRANSITIONS[property.status] || [];
-    if (!allowedTransitions.includes(newStatus)) {
-      toast.error(`Cannot change status from "${property.status}" to "${newStatus}"`);
+    const allowed = STATUS_TRANSITIONS[property.status] || [];
+    if (!allowed.includes(newStatus)) {
+      toast.error(`Cannot change from "${property.status}" to "${newStatus}"`);
       return;
     }
-
     setIsUpdatingStatus(true);
-
     try {
-      const { error } = await supabase
+      const { error: upErr } = await supabase
         .from('properties')
-        .update({ 
-          status: newStatus,
-          updated_at: new Date().toISOString()
-        })
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
         .eq('id', property.id);
-
-      if (error) throw error;
-
-      setProperty({ ...property, status: newStatus });
-      toast.success(`Property status updated to ${STATUS_CONFIG[newStatus].label}`);
-    } catch (error) {
-      console.error('Status update error:', error);
+      if (upErr) throw upErr;
+      setProperty({ ...property, status: newStatus as Property['status'] });
+      toast.success(`Status → ${STATUS_CONFIG[newStatus]?.label || newStatus}`);
+    } catch {
       toast.error('Failed to update status');
     } finally {
       setIsUpdatingStatus(false);
@@ -188,117 +125,86 @@ export default function LandlordPropertyManagePage() {
 
   const handleDeleteProperty = async () => {
     if (!property) return;
-
     setDeleting(true);
     const success = await deleteProperty(property.id);
     setDeleting(false);
-    
     if (success) {
       setDeleteDialogOpen(false);
       router.push('/dashboard/landlord');
     }
   };
 
-  // Get available actions based on current status
   const getAvailableActions = () => {
     if (!property) return [];
+    const actions: {
+      label: string;
+      icon: typeof CheckCircle;
+      action: () => void;
+      variant: 'default' | 'outline';
+      className?: string;
+    }[] = [];
+    const allowed = STATUS_TRANSITIONS[property.status] || [];
 
-    const actions = [];
-    const allowedTransitions = STATUS_TRANSITIONS[property.status] || [];
-
-    if (allowedTransitions.includes('pending')) {
+    if (allowed.includes('pending')) {
       actions.push({
-        label: 'Submit for Review',
+        label: property.status === 'rejected' ? 'Resubmit' : 'Submit for review',
         icon: CheckCircle,
         action: () => handleStatusChange('pending'),
-        variant: 'outline' as const,
-        className: 'text-green-600 border-green-600 hover:bg-green-50',
+        variant: 'outline',
+        className: 'text-emerald-600 dark:text-emerald-400 border-emerald-600/40',
       });
     }
-
-    if (allowedTransitions.includes('active')) {
+    if (allowed.includes('active') && property.status !== 'rented' && property.status !== 'taken') {
       actions.push({
-        label: 'Publish Listing',
+        label: 'Publish',
         icon: CheckCircle,
         action: () => handleStatusChange('active'),
-        variant: 'default' as const,
-        className: 'bg-green-600 hover:bg-green-700',
+        variant: 'default',
+        className: 'bg-emerald-600 hover:bg-emerald-700 text-white',
       });
     }
-
-    if (allowedTransitions.includes('rented')) {
+    if (allowed.includes('rented') || allowed.includes('taken')) {
       actions.push({
-        label: 'Mark as Rented',
+        label: 'Mark taken',
         icon: CheckCircle,
-        action: () => handleStatusChange('rented'),
-        variant: 'outline' as const,
-        className: 'text-blue-600 border-blue-600 hover:bg-blue-50',
+        action: () => handleStatusChange('taken'),
+        variant: 'outline',
+        className: 'text-blue-600 dark:text-blue-400 border-blue-600/40',
       });
     }
-
-    if (allowedTransitions.includes('active') && property.status === 'rented') {
+    if ((property.status === 'rented' || property.status === 'taken') && allowed.includes('active')) {
       actions.push({
-        label: 'Mark as Available',
+        label: 'Mark available',
         icon: XCircle,
         action: () => handleStatusChange('active'),
-        variant: 'outline' as const,
-        className: 'text-amber-600 border-amber-600 hover:bg-amber-50',
+        variant: 'outline',
+        className: 'text-amber-600 dark:text-amber-400 border-amber-600/40',
       });
     }
-
-    if (allowedTransitions.includes('rejected')) {
-      actions.push({
-        label: 'Reject',
-        icon: XCircle,
-        action: () => handleStatusChange('rejected'),
-        variant: 'outline' as const,
-        className: 'text-red-600 border-red-600 hover:bg-red-50',
-      });
-    }
-
-    // If status is rejected, allow resubmit
-    if (property.status === 'rejected' && allowedTransitions.includes('pending')) {
-      actions.push({
-        label: 'Resubmit for Review',
-        icon: AlertCircle,
-        action: () => handleStatusChange('pending'),
-        variant: 'outline' as const,
-        className: 'text-orange-600 border-orange-600 hover:bg-orange-50',
-      });
-    }
-
     return actions;
   };
 
-  // Loading state
   if (authLoading || loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
-          <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
-          <p className="text-gray-600">Loading property details...</p>
+          <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto mb-3" />
+          <p className="text-muted-foreground text-sm">Loading…</p>
         </div>
       </div>
     );
   }
 
-  // Error state
   if (error || !property) {
     return (
       <div className="container mx-auto px-4 py-8">
         <Card>
           <CardContent className="p-12 text-center">
-            <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-            <h2 className="text-2xl font-bold mb-2">Property Not Found</h2>
-            <p className="text-gray-500 mb-4">
-              {error ||
-                "The property you're looking for doesn't exist or you don't have permission to view it."}
-            </p>
+            <AlertCircle className="h-10 w-10 text-destructive mx-auto mb-3" />
+            <h2 className="text-xl font-bold mb-2">Not found</h2>
+            <p className="text-muted-foreground mb-4 text-sm">{error || 'No access to this listing.'}</p>
             <Button asChild>
-              <Link href="/dashboard/landlord">
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Back to Dashboard
-              </Link>
+              <Link href="/dashboard/landlord"><ArrowLeft className="mr-2 h-4 w-4" />Dashboard</Link>
             </Button>
           </CardContent>
         </Card>
@@ -306,52 +212,44 @@ export default function LandlordPropertyManagePage() {
     );
   }
 
-  const statusConfig = STATUS_CONFIG[property.status] || STATUS_CONFIG['draft'];
+  const statusConfig = STATUS_CONFIG[property.status] || STATUS_CONFIG.draft;
   const availableActions = getAvailableActions();
-
-  // ✅ FIXED: Convert status to string for comparison
   const statusString = String(property.status);
+  const intent = inferListingIntent(property);
+  const period = property.price_period || (intent === 'sale' ? 'once' : 'month');
+  const category = inferAssetCategory(property);
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b sticky top-0 z-10">
+    <div className="min-h-screen bg-background">
+      <div className="bg-card border-b border-border sticky top-0 z-10">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Button variant="ghost" size="icon" asChild>
-                <Link href="/dashboard/landlord">
-                  <ArrowLeft className="h-4 w-4" />
-                </Link>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-3 min-w-0">
+              <Button variant="ghost" size="icon" asChild className="shrink-0">
+                <Link href="/dashboard/landlord"><ArrowLeft className="h-4 w-4" /></Link>
               </Button>
-              <div>
-                <h1 className="text-xl font-semibold">{property.title}</h1>
-                <div className="flex items-center text-sm text-gray-500">
-                  <MapPin className="h-3 w-3 mr-1" />
-                  {property.location_suburb}, {property.location_city}, Eswatini
+              <div className="min-w-0">
+                <h1 className="text-lg font-semibold truncate text-foreground">{property.title}</h1>
+                <div className="flex items-center text-sm text-muted-foreground">
+                  <MapPin className="h-3 w-3 mr-1 shrink-0" />
+                  <span className="truncate">{property.location_suburb}, {property.location_city}</span>
                 </div>
               </div>
-              <Badge
-                variant={statusConfig.variant}
-                className={statusConfig.className}
-              >
+              <Badge variant={statusConfig.variant} className={statusConfig.className}>
                 {statusConfig.label}
               </Badge>
             </div>
-            <div className="flex gap-2">
-              {/* ✅ FIXED: Use string comparison */}
+            <div className="flex gap-2 flex-wrap">
               {statusString !== 'draft' && statusString !== 'rejected' && (
                 <Button variant="outline" size="sm" asChild>
                   <Link href={`/properties/${property.id}`} target="_blank">
-                    <Eye className="mr-2 h-4 w-4" />
-                    Public View
+                    <Eye className="mr-2 h-4 w-4" />Public
                   </Link>
                 </Button>
               )}
               <Button size="sm" asChild>
                 <Link href={`/dashboard/landlord/edit-property/${property.id}`}>
-                  <Edit className="mr-2 h-4 w-4" />
-                  Edit Property
+                  <Edit className="mr-2 h-4 w-4" />Edit
                 </Link>
               </Button>
             </div>
@@ -360,63 +258,32 @@ export default function LandlordPropertyManagePage() {
       </div>
 
       <div className="container mx-auto px-4 py-8">
-        {/* Quick Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-500">Views</p>
-                  <p className="text-2xl font-bold">{property.views || 0}</p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+          {[
+            { label: 'Views', value: property.views || 0, icon: Eye, color: 'text-blue-500' },
+            { label: 'Listed', value: new Date(property.created_at).toLocaleDateString(), icon: Calendar, color: 'text-violet-500' },
+            {
+              label: 'Price',
+              value: `E${property.price.toLocaleString()}${formatPricePeriod(period)}`,
+              icon: FileText,
+              color: 'text-emerald-500',
+            },
+            { label: 'Status', value: property.status, icon: FileText, color: 'text-muted-foreground' },
+          ].map((s) => (
+            <Card key={s.label}>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground">{s.label}</p>
+                    <p className="text-lg font-bold text-foreground truncate capitalize">{s.value}</p>
+                  </div>
+                  <s.icon className={`h-7 w-7 opacity-40 shrink-0 ${s.color}`} />
                 </div>
-                <Eye className="h-8 w-8 text-blue-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-500">Listed</p>
-                  <p className="text-2xl font-bold">
-                    {new Date(property.created_at).toLocaleDateString()}
-                  </p>
-                </div>
-                <Calendar className="h-8 w-8 text-purple-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-500">Price</p>
-                  <p className="text-2xl font-bold text-green-600">
-                    E{property.price.toLocaleString()}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-500">Status</p>
-                  <p className="text-2xl font-bold capitalize">
-                    {property.status}
-                  </p>
-                </div>
-                <FileText className="h-8 w-8 text-gray-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          ))}
         </div>
 
-        {/* Main Content Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="mb-6">
             <TabsTrigger value="overview">Overview</TabsTrigger>
@@ -424,124 +291,95 @@ export default function LandlordPropertyManagePage() {
             <TabsTrigger value="analytics">Analytics</TabsTrigger>
           </TabsList>
 
-          {/* Overview Tab */}
           <TabsContent value="overview">
             <div className="grid md:grid-cols-3 gap-6">
-              {/* Property Details */}
               <div className="md:col-span-2 space-y-6">
                 <Card>
-                  <CardHeader>
-                    <CardTitle>Property Details</CardTitle>
-                  </CardHeader>
+                  <CardHeader><CardTitle>Details</CardTitle></CardHeader>
                   <CardContent className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <p className="text-sm text-gray-500">Price</p>
-                        <p className="font-semibold text-lg">
-                          E{property.price.toLocaleString()}/month
+                        <p className="text-sm text-muted-foreground">Price</p>
+                        <p className="font-semibold text-foreground">
+                          E{property.price.toLocaleString()}
+                          <span className="text-sm font-normal text-muted-foreground">{formatPricePeriod(period)}</span>
                         </p>
                       </div>
                       <div>
-                        <p className="text-sm text-gray-500">Property Type</p>
-                        <p className="font-semibold capitalize">
-                          {property.property_type}
-                        </p>
+                        <p className="text-sm text-muted-foreground">Category</p>
+                        <p className="font-semibold text-foreground capitalize">{category}</p>
                       </div>
-                      <div>
-                        <p className="text-sm text-gray-500">Bedrooms</p>
-                        <p className="font-semibold">
-                          {property.bedrooms || 'N/A'}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-500">Bathrooms</p>
-                        <p className="font-semibold">
-                          {property.bathrooms || 'N/A'}
-                        </p>
-                      </div>
+                      {category === 'residential' && (
+                        <>
+                          <div>
+                            <p className="text-sm text-muted-foreground">Bedrooms</p>
+                            <p className="font-semibold text-foreground">{property.bedrooms ?? '—'}</p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-muted-foreground">Bathrooms</p>
+                            <p className="font-semibold text-foreground">{property.bathrooms ?? '—'}</p>
+                          </div>
+                        </>
+                      )}
+                      {category === 'land' && (
+                        <div>
+                          <p className="text-sm text-muted-foreground">Size</p>
+                          <p className="font-semibold text-foreground">{property.land_size_ha ?? '—'} ha</p>
+                        </div>
+                      )}
+                      {category === 'commercial' && (
+                        <div>
+                          <p className="text-sm text-muted-foreground">Floor area</p>
+                          <p className="font-semibold text-foreground">{property.floor_area_sqm ?? '—'} m²</p>
+                        </div>
+                      )}
                     </div>
-
-                    {property.is_furnished && (
-                      <Badge variant="outline" className="bg-gray-50">
-                        Furnished
-                      </Badge>
-                    )}
 
                     <div>
-                      <p className="text-sm text-gray-500 mb-1">Description</p>
-                      <p className="text-gray-700">{property.description}</p>
+                      <p className="text-sm text-muted-foreground mb-1">Description</p>
+                      <p className="text-foreground/90 whitespace-pre-line">{property.description}</p>
                     </div>
 
-                    {property.amenities && property.amenities.length > 0 && (
+                    {property.amenities?.length > 0 && (
                       <div>
-                        <p className="text-sm text-gray-500 mb-2">Amenities</p>
+                        <p className="text-sm text-muted-foreground mb-2">Features</p>
                         <div className="flex flex-wrap gap-2">
-                          {property.amenities.map((amenity) => (
-                            <Badge
-                              key={amenity}
-                              variant="outline"
-                              className="bg-gray-50"
-                            >
-                              {amenity}
-                            </Badge>
+                          {property.amenities.map((a) => (
+                            <Badge key={a} variant="outline">{a}</Badge>
                           ))}
                         </div>
                       </div>
                     )}
 
-                    {property.lease_terms && (
-                      <div>
-                        <p className="text-sm text-gray-500 mb-1">
-                          Lease Terms
-                        </p>
-                        <p className="text-gray-700">{property.lease_terms}</p>
-                      </div>
-                    )}
-
                     <div>
-                      <p className="text-sm text-gray-500 mb-1">Address</p>
-                      <p className="text-gray-700">
-                        {property.location_address || 'Address not provided'}
-                        <br />
-                        {property.location_suburb}, {property.location_city}, Eswatini
+                      <p className="text-sm text-muted-foreground mb-1">Location</p>
+                      <p className="text-foreground/90">
+                        {property.location_address && <>{property.location_address}<br /></>}
+                        {property.location_suburb}, {property.location_city}
                       </p>
                     </div>
 
                     <div>
-                      <p className="text-sm text-gray-500 mb-1">Contact</p>
-                      <p className="text-gray-700">
-                        Phone: {property.contact_phone}
-                      </p>
+                      <p className="text-sm text-muted-foreground mb-1">Contact</p>
+                      <p className="text-foreground/90">{property.contact_phone}</p>
                       {property.contact_whatsapp && (
-                        <p className="text-gray-700">
-                          WhatsApp: {property.contact_whatsapp}
-                        </p>
+                        <p className="text-foreground/90">WhatsApp: {property.contact_whatsapp}</p>
                       )}
                     </div>
                   </CardContent>
                 </Card>
 
-                {/* Status Management Card */}
                 <Card>
-                  <CardHeader>
-                    <CardTitle>Status Management</CardTitle>
-                  </CardHeader>
+                  <CardHeader><CardTitle>Status</CardTitle></CardHeader>
                   <CardContent>
-                    <div className="mb-4">
-                      <p className="text-sm text-gray-500">Current Status</p>
-                      <Badge
-                        variant={statusConfig.variant}
-                        className={`text-base ${statusConfig.className}`}
-                      >
-                        {statusConfig.label}
-                      </Badge>
-                    </div>
-
+                    <Badge variant={statusConfig.variant} className={`mb-4 ${statusConfig.className}`}>
+                      {statusConfig.label}
+                    </Badge>
                     {availableActions.length > 0 && (
                       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                        {availableActions.map((action, index) => (
+                        {availableActions.map((action, i) => (
                           <Button
-                            key={index}
+                            key={i}
                             variant={action.variant}
                             className={`flex-col h-auto py-4 ${action.className || ''}`}
                             onClick={action.action}
@@ -557,161 +395,99 @@ export default function LandlordPropertyManagePage() {
                         ))}
                       </div>
                     )}
-
                     {statusString === 'pending' && (
-                      <p className="text-sm text-amber-600 mt-4 flex items-center gap-2">
-                        <Clock className="h-4 w-4" />
-                        Your property is being reviewed. You will be notified once approved.
+                      <p className="text-sm text-amber-600 dark:text-amber-400 mt-4 flex items-center gap-2">
+                        <Clock className="h-4 w-4" />Under review — we’ll notify you when approved.
                       </p>
                     )}
-
                     {statusString === 'rejected' && (
-                      <p className="text-sm text-red-600 mt-4 flex items-center gap-2">
-                        <AlertCircle className="h-4 w-4" />
-                        Your property was rejected. Please review and resubmit.
+                      <p className="text-sm text-destructive mt-4 flex items-center gap-2">
+                        <AlertCircle className="h-4 w-4" />Rejected — edit and resubmit.
                       </p>
                     )}
                   </CardContent>
                 </Card>
 
-                {/* Quick Actions */}
                 <Card>
-                  <CardHeader>
-                    <CardTitle>Quick Actions</CardTitle>
-                  </CardHeader>
+                  <CardHeader><CardTitle>Actions</CardTitle></CardHeader>
                   <CardContent>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                      <Button
-                        variant="outline"
-                        className="flex-col h-auto py-4"
-                        asChild
-                      >
-                        <Link
-                          href={`/dashboard/landlord/edit-property/${property.id}`}
-                        >
-                          <Edit className="h-5 w-5 mb-2" />
-                          Edit Details
+                      <Button variant="outline" className="flex-col h-auto py-4" asChild>
+                        <Link href={`/dashboard/landlord/edit-property/${property.id}`}>
+                          <Edit className="h-5 w-5 mb-2" />Edit
                         </Link>
                       </Button>
-                      <Button
-                        variant="outline"
-                        className="flex-col h-auto py-4"
-                        onClick={() => setActiveTab('photos')}
-                      >
-                        <Camera className="h-5 w-5 mb-2" />
-                        Manage Photos
+                      <Button variant="outline" className="flex-col h-auto py-4" onClick={() => setActiveTab('photos')}>
+                        <Camera className="h-5 w-5 mb-2" />Photos
                       </Button>
                       <Button
                         variant="outline"
-                        className="flex-col h-auto py-4 text-red-600 hover:text-red-700"
+                        className="flex-col h-auto py-4 text-destructive hover:text-destructive"
                         onClick={() => setDeleteDialogOpen(true)}
                       >
-                        <Trash2 className="h-5 w-5 mb-2" />
-                        Delete
+                        <Trash2 className="h-5 w-5 mb-2" />Delete
                       </Button>
                     </div>
                   </CardContent>
                 </Card>
               </div>
 
-              {/* Sidebar */}
               <div className="space-y-6">
                 <Card>
-                  <CardHeader>
-                    <CardTitle>Listing Performance</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-gray-500">Views</span>
-                        <span className="font-semibold">{property.views || 0}</span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-gray-500">Status</span>
-                        <Badge variant="outline">{property.status}</Badge>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-gray-500">Listed</span>
-                        <span className="text-sm">
-                          {new Date(property.created_at).toLocaleDateString()}
-                        </span>
-                      </div>
-                      {statusString === 'active' && (
-                        <div className="mt-4 p-3 bg-green-50 rounded-lg">
-                          <p className="text-sm text-green-700">
-                            ✓ This property is live and visible to renters
-                          </p>
-                        </div>
-                      )}
-                      {statusString === 'draft' && (
-                        <div className="mt-4 p-3 bg-gray-50 rounded-lg">
-                          <p className="text-sm text-gray-600">
-                            📄 This is a draft. Submit for review to make it live.
-                          </p>
-                        </div>
-                      )}
+                  <CardHeader><CardTitle>Performance</CardTitle></CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Views</span>
+                      <span className="font-semibold text-foreground">{property.views || 0}</span>
                     </div>
+                    <div className="flex justify-between text-sm items-center">
+                      <span className="text-muted-foreground">Status</span>
+                      <Badge variant="outline" className="capitalize">{property.status}</Badge>
+                    </div>
+                    {statusString === 'active' && (
+                      <div className="mt-2 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                        <p className="text-sm text-emerald-700 dark:text-emerald-400">Live and visible to seekers</p>
+                      </div>
+                    )}
+                    {statusString === 'draft' && (
+                      <div className="mt-2 p-3 rounded-lg bg-muted border border-border">
+                        <p className="text-sm text-muted-foreground">Draft — submit for review to go live</p>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </div>
             </div>
           </TabsContent>
 
-          {/* Photos Tab */}
           <TabsContent value="photos">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>Property Photos</CardTitle>
+                <CardTitle>Photos</CardTitle>
                 <Button size="sm" asChild>
-                  <Link
-                    href={`/dashboard/landlord/edit-property/${property.id}`}
-                  >
-                    <Camera className="mr-2 h-4 w-4" />
-                    Manage Photos
+                  <Link href={`/dashboard/landlord/edit-property/${property.id}`}>
+                    <Camera className="mr-2 h-4 w-4" />Manage
                   </Link>
                 </Button>
               </CardHeader>
               <CardContent>
-                {property.photos && property.photos.length > 0 ? (
+                {property.photos?.length ? (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {property.photos.map((photo) => {
-                      const isPrimary = photo.display_order === 0;
-                      return (
-                        <div
-                          key={photo.id}
-                          className="relative aspect-square rounded-lg overflow-hidden group"
-                        >
-                          <Image
-                            src={photo.photo_url}
-                            alt="Property"
-                            fill
-                            className="object-cover"
-                          />
-                          {isPrimary && (
-                            <Badge className="absolute top-2 left-2 bg-primary">
-                              Cover Photo
-                            </Badge>
-                          )}
-                        </div>
-                      );
-                    })}
+                    {property.photos.map((photo) => (
+                      <div key={photo.id} className="relative aspect-square rounded-lg overflow-hidden bg-muted">
+                        <Image src={photo.photo_url} alt="" fill className="object-cover" />
+                        {photo.display_order === 0 && (
+                          <Badge className="absolute top-2 left-2">Cover</Badge>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 ) : (
                   <div className="text-center py-12">
-                    <Camera className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-                    <h3 className="text-lg font-semibold mb-2">
-                      No photos yet
-                    </h3>
-                    <p className="text-gray-500 mb-4">
-                      Add photos to make your property stand out.
-                    </p>
+                    <Camera className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
+                    <p className="text-muted-foreground mb-4">No photos yet</p>
                     <Button asChild>
-                      <Link
-                        href={`/dashboard/landlord/edit-property/${property.id}`}
-                      >
-                        <Camera className="mr-2 h-4 w-4" />
-                        Upload Photos
-                      </Link>
+                      <Link href={`/dashboard/landlord/edit-property/${property.id}`}>Upload</Link>
                     </Button>
                   </div>
                 )}
@@ -719,59 +495,29 @@ export default function LandlordPropertyManagePage() {
             </Card>
           </TabsContent>
 
-          {/* Analytics Tab */}
           <TabsContent value="analytics">
             <Card>
-              <CardHeader>
-                <CardTitle>Performance Analytics</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-12">
-                  <BarChart className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">
-                    Analytics Coming Soon
-                  </h3>
-                  <p className="text-gray-500">
-                    We're working on bringing you detailed insights about
-                    your listing performance in Eswatini.
-                  </p>
-                </div>
+              <CardContent className="py-16 text-center">
+                <BarChart className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
+                <h3 className="font-semibold mb-1 text-foreground">Analytics soon</h3>
+                <p className="text-sm text-muted-foreground">Views over time and engagement for your listings.</p>
               </CardContent>
             </Card>
           </TabsContent>
         </Tabs>
       </div>
 
-      {/* Delete Confirmation Dialog */}
       {deleteDialogOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <Card className="max-w-md w-full mx-4">
+        <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 p-4">
+          <Card className="max-w-md w-full">
             <CardContent className="p-6">
-              <h3 className="text-lg font-semibold mb-2">Delete Property</h3>
-              <p className="text-gray-500 mb-4">
-                Are you sure you want to delete this property? This action
-                cannot be undone.
-              </p>
+              <h3 className="text-lg font-semibold mb-2 text-foreground">Delete listing?</h3>
+              <p className="text-muted-foreground text-sm mb-4">This cannot be undone.</p>
               <div className="flex justify-end gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => setDeleteDialogOpen(false)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={handleDeleteProperty}
-                  disabled={deleting}
-                >
-                  {deleting ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Deleting...
-                    </>
-                  ) : (
-                    'Delete Property'
-                  )}
+                <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
+                <Button variant="destructive" onClick={handleDeleteProperty} disabled={deleting}>
+                  {deleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Delete
                 </Button>
               </div>
             </CardContent>
