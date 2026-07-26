@@ -5,20 +5,9 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { 
-  Home, 
-  Mail, 
-  Phone, 
-  MapPin, 
-  Facebook, 
-  Twitter, 
-  Instagram, 
-  Youtube,
-  ChevronRight,
-  Shield,
-  CheckCircle,
-  Clock,
-  Award,
+import {
+  Home, Mail, Phone, MapPin, Facebook, Twitter, Instagram, Youtube,
+  ChevronRight, Shield, CheckCircle, Clock, Award,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,23 +19,17 @@ export function Footer() {
 
   const handleSubscribe = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email) {
-      toast.error('Please enter your email address');
+    if (!email || !email.includes('@')) {
+      toast.error('Please enter a valid email');
       return;
     }
-    if (!email.includes('@')) {
-      toast.error('Please enter a valid email address');
-      return;
-    }
-
     setIsLoading(true);
     try {
-      // In production, send to your API endpoint
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      toast.success('Successfully subscribed to newsletter! 🎉');
+      await new Promise((r) => setTimeout(r, 800));
+      toast.success('Subscribed — welcome to Ekhaya updates');
       setEmail('');
     } catch {
-      toast.error('Something went wrong. Please try again.');
+      toast.error('Something went wrong');
     } finally {
       setIsLoading(false);
     }
@@ -61,21 +44,20 @@ export function Footer() {
     ],
     renters: [
       { name: 'Search Properties', href: '/search' },
-      { name: 'Saved Properties', href: '/saved' },
-      { name: 'Price Alerts', href: '/alerts' },
-      { name: 'Rental Guides', href: '/guides' },
+      { name: 'Map', href: '/map' },
+      { name: 'Saved Properties', href: '/dashboard/renter' },
+      { name: 'FAQs', href: '/faqs' },
     ],
     landlords: [
       { name: 'List a Property', href: '/dashboard/landlord/add-property' },
       { name: 'Manage Listings', href: '/dashboard/landlord' },
       { name: 'Pricing', href: '/pricing' },
-      { name: 'Landlord Resources', href: '/resources' },
     ],
     support: [
-      { name: 'FAQs', href: '/faqs' },
       { name: 'Help Center', href: '/help' },
       { name: 'Newsletter', href: '/newsletter' },
       { name: 'Privacy Policy', href: '/privacy' },
+      { name: 'Terms', href: '/terms' },
     ],
   };
 
@@ -86,199 +68,142 @@ export function Footer() {
     { name: 'Youtube', icon: Youtube, href: '#' },
   ];
 
-  return (
-    <footer className="bg-gray-900 dark:bg-gray-950 text-white">
-      {/* Main Footer */}
-      <div className="container mx-auto px-4 py-12 md:py-16">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-8 lg:gap-12">
-          {/* Brand Column */}
-          <div className="lg:col-span-1">
-            <Link href="/" className="flex items-center space-x-2 mb-4 hover:opacity-80 transition-opacity">
-              <Home className="h-6 w-6 text-indigo-400" />
-              <span className="font-bold text-xl">Ekhaya</span>
+  const LinkCol = ({
+    title,
+    links,
+  }: {
+    title: string;
+    links: { name: string; href: string }[];
+  }) => (
+    <div>
+      <h4 className="font-semibold text-foreground mb-3 text-sm">{title}</h4>
+      <ul className="space-y-2">
+        {links.map((link) => (
+          <li key={link.name}>
+            <Link
+              href={link.href}
+              className={`text-muted-foreground hover:text-foreground transition-colors text-sm flex items-center gap-1 group ${
+                pathname === link.href ? 'text-foreground font-medium' : ''
+              }`}
+            >
+              <ChevronRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+              {link.name}
             </Link>
-            <p className="text-gray-400 text-sm mb-4 max-w-xs">
-              Find your next home in Eswatini. Fast, easy, and verified.
-            </p>
-            <div className="space-y-2 text-sm">
-              <div className="flex items-center gap-2 text-gray-400">
-                <MapPin className="h-4 w-4 text-indigo-400 shrink-0" />
-                <span>Manzini, Eswatini</span>
-              </div>
-              <div className="flex items-center gap-2 text-gray-400">
-                <Phone className="h-4 w-4 text-indigo-400 shrink-0" />
-                <span>+268 1234 5678</span>
-              </div>
-              <div className="flex items-center gap-2 text-gray-400">
-                <Mail className="h-4 w-4 text-indigo-400 shrink-0" />
-                <span>info@ekhaya.co.sz</span>
-              </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+
+  return (
+    <footer className="bg-muted/40 dark:bg-gray-950 border-t border-border text-foreground">
+      <div className="container mx-auto px-4 py-10 md:py-14">
+        {/* Brand */}
+        <div className="mb-8 max-w-md">
+          <Link href="/" className="flex items-center gap-2 mb-3 hover:opacity-80 transition-opacity">
+            <Home className="h-5 w-5 text-primary" />
+            <span className="font-bold text-lg">Ekhaya</span>
+          </Link>
+          <p className="text-muted-foreground text-sm mb-3">
+            Find your next home in Eswatini. Fast, easy, and verified.
+          </p>
+          <div className="space-y-1.5 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2">
+              <MapPin className="h-3.5 w-3.5 text-primary shrink-0" />
+              <span>Manzini, Eswatini</span>
             </div>
-            {/* Social Links */}
-            <div className="flex gap-3 mt-4">
+            <div className="flex items-center gap-2">
+              <Phone className="h-3.5 w-3.5 text-primary shrink-0" />
+              <span>+268 1234 5678</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Mail className="h-3.5 w-3.5 text-primary shrink-0" />
+              <span>info@ekhaya.co.sz</span>
+            </div>
+          </div>
+        </div>
+
+        {/*
+          Mobile: 2 columns × 2 rows
+          Company | For Seekers
+          For Landlords | Support
+          Desktop: 4 columns
+        */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-8">
+          <LinkCol title="Company" links={footerLinks.company} />
+          <LinkCol title="For Seekers" links={footerLinks.renters} />
+          <LinkCol title="For Landlords" links={footerLinks.landlords} />
+          <LinkCol title="Support" links={footerLinks.support} />
+        </div>
+
+        {/* Newsletter */}
+        <div className="mt-10 pt-8 border-t border-border">
+          <div className="grid md:grid-cols-2 gap-4 items-center">
+            <div>
+              <h4 className="font-semibold text-sm mb-1">Newsletter</h4>
+              <p className="text-muted-foreground text-sm">
+                New listings and tips for Eswatini renters and landlords.
+              </p>
+            </div>
+            <form onSubmit={handleSubscribe} className="flex flex-col sm:flex-row gap-2">
+              <Input
+                type="email"
+                placeholder="you@email.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="flex-1 bg-background"
+                disabled={isLoading}
+                required
+              />
+              <Button type="submit" disabled={isLoading} className="whitespace-nowrap">
+                {isLoading ? '…' : 'Subscribe'}
+              </Button>
+            </form>
+          </div>
+        </div>
+
+        {/* Trust */}
+        <div className="mt-8 pt-6 border-t border-border">
+          <div className="flex flex-wrap justify-center gap-5 text-muted-foreground">
+            <div className="flex items-center gap-1.5 text-xs">
+              <Shield className="h-3.5 w-3.5 text-primary" /> Secure
+            </div>
+            <div className="flex items-center gap-1.5 text-xs">
+              <CheckCircle className="h-3.5 w-3.5 text-emerald-500" /> Verified listings
+            </div>
+            <div className="flex items-center gap-1.5 text-xs">
+              <Clock className="h-3.5 w-3.5 text-amber-500" /> Local support
+            </div>
+            <div className="flex items-center gap-1.5 text-xs">
+              <Award className="h-3.5 w-3.5 text-rose-500" /> Built for Eswatini
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom: social first, then copyright */}
+      <div className="border-t border-border bg-muted/60 dark:bg-black/40">
+        <div className="container mx-auto px-4 py-5">
+          <div className="flex flex-col items-center gap-4">
+            <div className="flex gap-3">
               {socialLinks.map((social) => (
                 <a
                   key={social.name}
                   href={social.href}
-                  className="w-9 h-9 rounded-full bg-gray-800 hover:bg-indigo-600 flex items-center justify-center transition-colors duration-300"
+                  className="w-9 h-9 rounded-full bg-background border border-border hover:border-primary hover:text-primary flex items-center justify-center transition-colors"
                   aria-label={social.name}
                 >
                   <social.icon className="h-4 w-4" />
                 </a>
               ))}
             </div>
-          </div>
-
-          {/* Quick Links */}
-          <div>
-            <h4 className="font-semibold text-white mb-4">Company</h4>
-            <ul className="space-y-2.5">
-              {footerLinks.company.map((link) => (
-                <li key={link.name}>
-                  <Link
-                    href={link.href}
-                    className={`text-gray-400 hover:text-white transition-colors duration-200 text-sm flex items-center gap-1 group ${
-                      pathname === link.href ? 'text-white' : ''
-                    }`}
-                  >
-                    <ChevronRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    {link.name}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div>
-            <h4 className="font-semibold text-white mb-4">For Renters</h4>
-            <ul className="space-y-2.5">
-              {footerLinks.renters.map((link) => (
-                <li key={link.name}>
-                  <Link
-                    href={link.href}
-                    className={`text-gray-400 hover:text-white transition-colors duration-200 text-sm flex items-center gap-1 group ${
-                      pathname === link.href ? 'text-white' : ''
-                    }`}
-                  >
-                    <ChevronRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    {link.name}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div>
-            <h4 className="font-semibold text-white mb-4">For Landlords</h4>
-            <ul className="space-y-2.5">
-              {footerLinks.landlords.map((link) => (
-                <li key={link.name}>
-                  <Link
-                    href={link.href}
-                    className={`text-gray-400 hover:text-white transition-colors duration-200 text-sm flex items-center gap-1 group ${
-                      pathname === link.href ? 'text-white' : ''
-                    }`}
-                  >
-                    <ChevronRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    {link.name}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div>
-            <h4 className="font-semibold text-white mb-4">Support</h4>
-            <ul className="space-y-2.5">
-              {footerLinks.support.map((link) => (
-                <li key={link.name}>
-                  <Link
-                    href={link.href}
-                    className={`text-gray-400 hover:text-white transition-colors duration-200 text-sm flex items-center gap-1 group ${
-                      pathname === link.href ? 'text-white' : ''
-                    }`}
-                  >
-                    <ChevronRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    {link.name}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-
-        {/* Newsletter Signup */}
-        <div className="mt-12 pt-8 border-t border-gray-800">
-          <div className="grid md:grid-cols-2 gap-6 items-center">
-            <div>
-              <h4 className="font-semibold text-white mb-1">
-                Subscribe to our Newsletter
-              </h4>
-              <p className="text-gray-400 text-sm">
-                Get the latest properties and rental tips in your inbox.
-              </p>
-            </div>
-            <form onSubmit={handleSubscribe} className="flex flex-col sm:flex-row gap-2">
-              <Input
-                type="email"
-                placeholder="Enter your email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="flex-1 bg-gray-800 border-gray-700 text-white placeholder:text-gray-500 focus:border-indigo-500"
-                disabled={isLoading}
-                required
-              />
-              <Button 
-                type="submit" 
-                className="bg-indigo-600 hover:bg-indigo-700 text-white whitespace-nowrap"
-                disabled={isLoading}
-              >
-                {isLoading ? 'Subscribing...' : 'Subscribe'}
-              </Button>
-            </form>
-          </div>
-        </div>
-
-        {/* Trust Badges */}
-        <div className="mt-8 pt-8 border-t border-gray-800">
-          <div className="flex flex-wrap justify-center items-center gap-6 md:gap-8 text-gray-400">
-            <div className="flex items-center gap-2">
-              <Shield className="h-4 w-4 text-indigo-400" />
-              <span className="text-xs">Secure & Safe</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <CheckCircle className="h-4 w-4 text-emerald-400" />
-              <span className="text-xs">Verified Listings</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Clock className="h-4 w-4 text-amber-400" />
-              <span className="text-xs">24/7 Support</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Award className="h-4 w-4 text-rose-400" />
-              <span className="text-xs">Trusted Platform</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom Bar */}
-      <div className="border-t border-gray-800">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex flex-col sm:flex-row justify-between items-center gap-2 text-sm text-gray-400">
-            <p>
-              &copy; {new Date().getFullYear()} Ekhaya. All rights reserved.
-            </p>
-            <div className="flex items-center gap-4 text-xs">
-              <Link href="/privacy" className="hover:text-white transition-colors">
-                Privacy
-              </Link>
-              <Link href="/terms" className="hover:text-white transition-colors">
-                Terms
-              </Link>
-              <Link href="/cookies" className="hover:text-white transition-colors">
-                Cookies
-              </Link>
+            <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-4 text-xs text-muted-foreground">
+              <p>© {new Date().getFullYear()} Ekhaya. All rights reserved.</p>
+              <div className="flex gap-3">
+                <Link href="/privacy" className="hover:text-foreground">Privacy</Link>
+                <Link href="/terms" className="hover:text-foreground">Terms</Link>
+                <Link href="/cookies" className="hover:text-foreground">Cookies</Link>
+              </div>
             </div>
           </div>
         </div>
