@@ -10,11 +10,12 @@ import { useVerification } from '@/hooks/useVerification';
 import { usePhoneVerification } from '@/hooks/usePhoneVerification';
 import { useListingPhotos } from '@/hooks/useListingPhotos';
 import { supabase } from '@/lib/supabase';
+import { saveListingRow } from '@/lib/saveListing';
 import {
   AssetCategory, ListingIntent, TenureType, FitOut, TENURE_CONFIG,
   RESIDENTIAL_SUBTYPE_LABELS, LAND_SUBTYPE_LABELS, COMMERCIAL_SUBTYPE_LABELS,
-  FIT_OUT_LABELS, LISTING_INTENT_LABELS, ASSET_CATEGORY_LABELS, defaultPricePeriod,
-  subtypeToLegacyPropertyType, ResidentialSubtype, LandSubtype, CommercialSubtype,
+  FIT_OUT_LABELS, LISTING_INTENT_LABELS, ASSET_CATEGORY_LABELS,
+  ResidentialSubtype, LandSubtype, CommercialSubtype,
 } from '@/types/property';
 import { canPostListings, normalizeUserType } from '@/types/user';
 import {
@@ -22,7 +23,7 @@ import {
   FIT_OUT_OPTIONS, RESIDENTIAL_AMENITIES, LAND_AMENITIES, COMMERCIAL_AMENITIES,
   ROOM_OPTIONS, BATH_OPTIONS, MAX_PHOTOS,
 } from '@/utils/constants';
-import { normalizeEswatiniPhone, isValidEswatiniPhone } from '@/utils/phone';
+import { isValidEswatiniPhone } from '@/utils/phone';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -97,13 +98,9 @@ export default function AddPropertyPage() {
   const isResidential = formData.asset_category === 'residential';
   const isCommercial = formData.asset_category === 'commercial';
 
-  // Autofill contact from verified account phone (once)
   useEffect(() => {
     if (!accountPhone) return;
-    setFormData((p) => {
-      if (p.contact_phone) return p;
-      return { ...p, contact_phone: accountPhone };
-    });
+    setFormData((p) => (p.contact_phone ? p : { ...p, contact_phone: accountPhone }));
   }, [accountPhone]);
 
   useEffect(() => {
@@ -153,7 +150,7 @@ export default function AddPropertyPage() {
     setFormData((p) => ({ ...p, asset_category: cat, property_subtype: '', amenities: [] }));
   };
 
-  const validateForm = (): { valid: boolean; errors: string[] } => {
+  const validateForPublish = (): string[] => {
     const errors: string[] = [];
     if (!formData.asset_category) errors.push('Category');
     if (!formData.listing_intent) errors.push('Intent');
@@ -174,124 +171,116 @@ export default function AddPropertyPage() {
       const area = parseFloat(formData.floor_area_sqm);
       if (!formData.floor_area_sqm || isNaN(area) || area <= 0) errors.push('Floor area (m²)');
     }
-    return { valid: errors.length === 0, errors };
+    return errors;
   };
 
-  const uploadPhotos = async (propertyId: string): Promise<string[]> => {
-    if (photos.length === 0) return [];
-    const urls: string[] = [];
+  const uploadPhotos = async (propertyId: string): Promise<void> => {
+    if (!user || photos.length === 0) return;
     for (let i = 0; i < photos.length; i++) {
       const photo = photos[i];
       const ext = photo.name.split('.').pop() || 'jpg';
-      const fileName = `${user!.id}/${propertyId}/${Date.now()}-${i}.${ext}`;
+      const fileName = `${user.id}/${propertyId}/${Date.now()}-${i}.${ext}`;
       setUploadProgress({ current: i + 1, total: photos.length });
       const { error: upErr } = await supabase.storage.from('property-photos').upload(fileName, photo);
       if (upErr) throw new Error(upErr.message);
       const { data: { publicUrl } } = supabase.storage.from('property-photos').getPublicUrl(fileName);
-      urls.push(publicUrl);
+      await supabase.from('property_photos').insert({
+        property_id: propertyId,
+        photo_url: publicUrl,
+        display_order: i,
+        caption: null,
+      });
     }
     setUploadProgress(null);
-    return urls;
   };
 
-  const saveProperty = async (status: 'pending' | 'draft') => {
+  const handleSaveDraft = async () => {
+    if (!user) return;
     setError(null);
-    if (status === 'pending') {
-      const { valid, errors } = validateForm();
-      if (!valid) { setError(errors.join('. ')); return false; }
-      if (!isPhoneVerified) { setPhoneDialogOpen(true); setError('Verify phone first'); return false; }
-      if (!isLandlordVerified) { setError('Account verification required'); return false; }
-    }
-    if (!user) return false;
-
+    setSavingDraft(true);
     try {
-      const intent = (formData.listing_intent || 'long_rent') as ListingIntent;
-      const category = (formData.asset_category || 'residential') as AssetCategory;
-      const subtype = formData.property_subtype || 'other_residential';
-
-      const propertyData: Record<string, unknown> = {
-        landlord_id: user.id,
-        title: formData.title.trim() || 'Untitled',
-        description: formData.description.trim() || '',
-        listing_intent: intent,
-        asset_category: category,
-        property_subtype: subtype,
-        property_type: subtypeToLegacyPropertyType(subtype),
-        listing_type: category === 'land' ? 'land' : intent === 'sale' ? 'buy' : 'rent',
-        price_period: defaultPricePeriod(intent),
-        tenure_type: formData.tenure_type,
-        price: parseFloat(formData.price) || 0,
-        location_city: formData.city,
-        location_suburb: formData.suburb.trim(),
-        location_address: formData.address.trim() || null,
-        amenities: formData.amenities,
-        lease_terms: formData.lease_terms.trim() || null,
-        contact_whatsapp: formData.contact_whatsapp.trim() || null,
-        contact_phone: normalizeEswatiniPhone(formData.contact_phone.trim()),
-        status,
-        views: 0,
-        is_featured: false,
-      };
-
-      if (category === 'residential') {
-        propertyData.bedrooms = parseInt(formData.bedrooms, 10) || null;
-        propertyData.bathrooms = parseFloat(formData.bathrooms) || null;
-        propertyData.is_furnished = formData.is_furnished;
-      } else if (category === 'land') {
-        propertyData.land_size_ha = parseFloat(formData.land_size_ha) || null;
-        propertyData.is_fenced = formData.is_fenced;
-        propertyData.has_road_access = formData.has_road_access;
-        propertyData.has_water = formData.has_water;
-        propertyData.has_electricity = formData.has_electricity;
-        propertyData.has_sewer = formData.has_sewer;
-        propertyData.zoning_notes = formData.zoning_notes.trim() || null;
-      } else if (category === 'commercial') {
-        propertyData.floor_area_sqm = parseFloat(formData.floor_area_sqm) || null;
-        propertyData.floors = formData.floors ? parseInt(formData.floors, 10) : null;
-        propertyData.parking_bays = formData.parking_bays ? parseInt(formData.parking_bays, 10) : null;
-        propertyData.fit_out = formData.fit_out || null;
-        propertyData.has_loading_bay = formData.has_loading_bay;
-        propertyData.has_street_frontage = formData.has_street_frontage;
-        propertyData.power_notes = formData.power_notes.trim() || null;
+      const result = await saveListingRow({
+        userId: user.id,
+        form: formData,
+        status: 'draft',
+        contactPhoneFallback: accountPhone,
+      });
+      if (!result.ok) {
+        setError(result.error);
+        toast.error(result.error);
+        return;
       }
-
-      const { data: property, error: propertyError } = await supabase
-        .from('properties').insert([propertyData]).select().single();
-      if (propertyError) throw new Error(propertyError.message);
-
       if (photos.length > 0) {
         try {
-          const photoUrls = await uploadPhotos(property.id);
-          if (photoUrls.length) {
-            await supabase.from('property_photos').insert(
-              photoUrls.map((url, index) => ({
-                property_id: property.id, photo_url: url, display_order: index, caption: null,
-              }))
-            );
-          }
-        } catch { toast.warning('Saved but photos failed'); }
+          await uploadPhotos(result.id);
+        } catch {
+          toast.warning('Draft saved, but some photos failed');
+        }
       }
-      return property.id;
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Error');
-      return false;
+      toast.success('Draft saved');
+      router.push('/dashboard/landlord');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Could not save draft';
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setSavingDraft(false);
+      setUploadProgress(null);
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isPhoneVerified) { setPhoneDialogOpen(true); return; }
-    setLoading(true);
-    const id = await saveProperty('pending');
-    if (id) { toast.success('Submitted for review'); router.push('/dashboard/landlord'); }
-    setLoading(false);
-  };
+    if (!user) return;
 
-  const handleSaveDraft = async () => {
-    setSavingDraft(true);
-    const id = await saveProperty('draft');
-    if (id) { toast.success('Draft saved'); router.push('/dashboard/landlord'); }
-    setSavingDraft(false);
+    if (!isPhoneVerified) {
+      setPhoneDialogOpen(true);
+      setError('Verify your phone once, then publish');
+      return;
+    }
+    if (!isLandlordVerified) {
+      setError('Account verification required to publish');
+      return;
+    }
+
+    const errs = validateForPublish();
+    if (errs.length) {
+      setError(errs.join('. '));
+      toast.error('Complete required fields');
+      return;
+    }
+
+    setError(null);
+    setLoading(true);
+    try {
+      const result = await saveListingRow({
+        userId: user.id,
+        form: formData,
+        status: 'pending',
+        contactPhoneFallback: accountPhone,
+      });
+      if (!result.ok) {
+        setError(result.error);
+        toast.error(result.error);
+        return;
+      }
+      if (photos.length > 0) {
+        try {
+          await uploadPhotos(result.id);
+        } catch {
+          toast.warning('Submitted, but some photos failed');
+        }
+      }
+      toast.success('Submitted for review');
+      router.push('/dashboard/landlord');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Submit failed';
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setLoading(false);
+      setUploadProgress(null);
+    }
   };
 
   const priceLabel = formData.listing_intent === 'sale' ? 'Sale price (E) *' : 'Monthly rent (E) *';
@@ -597,7 +586,7 @@ export default function AddPropertyPage() {
         <Card className="border-amber-500/30 bg-amber-500/10 mb-6">
           <CardContent className="p-4 flex gap-3">
             {isLandlordPending ? <Clock className="h-6 w-6 text-amber-600" /> : <AlertCircle className="h-6 w-6 text-red-600" />}
-            <p className="text-sm">Drafts allowed now. Publish needs account verification + phone.</p>
+            <p className="text-sm">Drafts work anytime. Publish needs account verification + phone.</p>
           </CardContent>
         </Card>
       )}
@@ -616,28 +605,37 @@ export default function AddPropertyPage() {
       <form onSubmit={handleSubmit}>
         {error && <Alert variant="destructive" className="mb-4"><AlertDescription>{error}</AlertDescription></Alert>}
         <Card><CardContent className="p-6">{renderStep()}</CardContent></Card>
-        <div className="flex justify-between mt-6">
-          <Button type="button" variant="outline" onClick={handlePrevious} disabled={currentStep === 1}><ChevronLeft className="h-4 w-4 mr-1" />Previous</Button>
-          <div className="flex gap-2">
-            {currentStep === TOTAL_STEPS && (
-              <Button type="button" variant="outline" onClick={handleSaveDraft} disabled={savingDraft}>
-                {savingDraft ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4 mr-1" />} Draft
-              </Button>
-            )}
+        <div className="flex justify-between mt-6 gap-2 flex-wrap">
+          <Button type="button" variant="outline" onClick={handlePrevious} disabled={currentStep === 1}>
+            <ChevronLeft className="h-4 w-4 mr-1" />Previous
+          </Button>
+          <div className="flex gap-2 flex-wrap">
+            <Button type="button" variant="outline" onClick={handleSaveDraft} disabled={savingDraft || loading}>
+              {savingDraft ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Save className="h-4 w-4 mr-1" />}
+              Save draft
+            </Button>
             {currentStep < TOTAL_STEPS ? (
               <Button type="button" onClick={handleNext}>Next <ChevronRight className="h-4 w-4 ml-1" /></Button>
             ) : isLandlordVerified ? (
-              <Button type="submit" disabled={loading}>{loading && <Loader2 className="h-4 w-4 animate-spin mr-1" />}Submit</Button>
+              <Button type="submit" disabled={loading}>
+                {loading && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                Submit
+              </Button>
             ) : (
-              <Button type="button" variant="secondary" disabled><Eye className="h-4 w-4 mr-1" />Verify to submit</Button>
+              <Button type="button" variant="secondary" disabled>
+                <Eye className="h-4 w-4 mr-1" />Verify to submit
+              </Button>
             )}
           </div>
         </div>
       </form>
 
-      <PhoneVerifyDialog open={phoneDialogOpen} onOpenChange={setPhoneDialogOpen}
+      <PhoneVerifyDialog
+        open={phoneDialogOpen}
+        onOpenChange={setPhoneDialogOpen}
         defaultPhone={formData.contact_phone || accountPhone || ''}
-        onVerified={() => { refreshPhone(); toast.success('Phone verified'); }} />
+        onVerified={() => { refreshPhone(); toast.success('Phone verified'); }}
+      />
     </div>
   );
 }
