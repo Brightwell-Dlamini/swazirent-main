@@ -8,6 +8,7 @@ import { AuthProvider } from '@/contexts/AuthContext';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { BackToTop } from '@/components/ui/BackToTop';
+import { PhoneBanner } from '@/components/auth/PhoneBanner';
 import { Toaster } from 'sonner';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Providers } from './providers';
@@ -78,6 +79,7 @@ export default function RootLayout({
             <Providers>
               <ErrorBoundary>
                 <Header />
+                <PhoneBanner />
                 <div id="main-content" className="flex-1">
                   {children}
                 </div>
