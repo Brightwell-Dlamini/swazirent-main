@@ -9,6 +9,7 @@ import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { BackToTop } from '@/components/ui/BackToTop';
 import { PhoneBanner } from '@/components/auth/PhoneBanner';
+import { OfflineBanner } from '@/components/OfflineBanner';
 import { Toaster } from 'sonner';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Providers } from './providers';
@@ -79,6 +80,7 @@ export default function RootLayout({
             <Providers>
               <ErrorBoundary>
                 <Header />
+                <OfflineBanner />
                 <PhoneBanner />
                 <div id="main-content" className="flex-1">
                   {children}

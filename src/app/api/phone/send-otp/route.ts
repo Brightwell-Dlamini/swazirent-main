@@ -60,45 +60,72 @@ async function sendSms(to: string, body: string): Promise<{ ok: boolean; error?:
   }
 }
 
+function json(
+  body: Record<string, unknown>,
+  status: number,
+  extraHeaders?: Record<string, string>
+) {
+  return NextResponse.json(body, {
+    status,
+    headers: {
+      'Cache-Control': 'no-store',
+      ...extraHeaders,
+    },
+  });
+}
+
 export async function POST(req: NextRequest) {
   try {
     const authHeader = req.headers.get('authorization');
     if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return json({ error: 'Unauthorized', code: 'AUTH_REQUIRED' }, 401);
     }
     const jwt = authHeader.slice(7);
 
     const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(jwt);
     if (userError || !userData.user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return json({ error: 'Unauthorized', code: 'AUTH_INVALID' }, 401);
     }
     const userId = userData.user.id;
 
     const body = await req.json();
     const phone = normalizePhone(body.phone || '');
     if (!phone || phone.length < 10) {
-      return NextResponse.json({ error: 'Valid Eswatini phone required' }, { status: 400 });
+      return json({ error: 'Valid Eswatini phone required', code: 'PHONE_INVALID' }, 400);
     }
 
-    // Rate limit: max 5 OTPs in 15 minutes
-    const since = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    const windowMs = 15 * 60 * 1000;
+    const maxAttempts = 5;
+    const since = new Date(Date.now() - windowMs).toISOString();
     const { count } = await supabaseAdmin
       .from('phone_otps')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', userId)
       .gte('created_at', since);
 
-    if ((count || 0) >= 5) {
-      return NextResponse.json(
-        { error: 'Too many attempts. Please wait 15 minutes.' },
-        { status: 429 }
+    const used = count || 0;
+    const remaining = Math.max(0, maxAttempts - used);
+    const rateHeaders = {
+      'X-RateLimit-Limit': String(maxAttempts),
+      'X-RateLimit-Remaining': String(remaining),
+      'X-RateLimit-Window': '900',
+    };
+
+    if (used >= maxAttempts) {
+      return json(
+        {
+          error: 'Too many attempts. Please wait 15 minutes.',
+          code: 'RATE_LIMITED',
+          retryAfterSeconds: 900,
+        },
+        429,
+        { ...rateHeaders, 'Retry-After': '900' }
       );
     }
 
     const code = String(randomInt(100000, 999999));
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
-    // Invalidate previous unused codes
     await supabaseAdmin
       .from('phone_otps')
       .update({ consumed: true })
@@ -116,9 +143,9 @@ export async function POST(req: NextRequest) {
 
     if (insertError) {
       console.error('OTP insert error:', insertError);
-      return NextResponse.json(
-        { error: `OTP service error: ${insertError.message}` },
-        { status: 503 }
+      return json(
+        { error: `OTP service error: ${insertError.message}`, code: 'OTP_STORE_FAILED' },
+        503
       );
     }
 
@@ -128,27 +155,29 @@ export async function POST(req: NextRequest) {
     );
 
     if (!sms.ok) {
-      return NextResponse.json({ error: sms.error || 'Failed to send SMS' }, { status: 502 });
+      return json({ error: sms.error || 'Failed to send SMS', code: 'SMS_FAILED' }, 502);
     }
 
-    /**
-     * DB only stores code_hash (never the plain code) — that is intentional.
-     * When Twilio is not configured, return the code in the API response
-     * so the UI can show it. Works on Vercel preview/prod without SMS.
-     * Force-hide with PHONE_OTP_HIDE_DEV_CODE=true if needed.
-     */
     const exposeDevCode =
       !twilioConfigured() && process.env.PHONE_OTP_HIDE_DEV_CODE !== 'true';
 
-    return NextResponse.json({
-      success: true,
-      message: exposeDevCode
-        ? 'Dev mode — enter the code shown below (no SMS configured)'
-        : 'Code sent by SMS',
-      ...(exposeDevCode ? { devCode: code } : {}),
-    });
+    return json(
+      {
+        success: true,
+        code: 'OTP_SENT',
+        message: exposeDevCode
+          ? 'Dev mode — enter the code shown below (no SMS configured)'
+          : 'Code sent by SMS',
+        ...(exposeDevCode ? { devCode: code } : {}),
+      },
+      200,
+      {
+        ...rateHeaders,
+        'X-RateLimit-Remaining': String(Math.max(0, remaining - 1)),
+      }
+    );
   } catch (e) {
     console.error('send-otp error:', e);
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 });
+    return json({ error: 'Internal error', code: 'INTERNAL' }, 500);
   }
 }
