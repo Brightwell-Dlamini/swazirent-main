@@ -9,10 +9,8 @@ import { supabase } from '@/lib/supabase';
 import {
   ASSIGNABLE_ROLES,
   ADMIN_USER_TYPE_FILTERS,
-  canPostListings,
   getUserTypeLabel,
   isPosterRole,
-  POSTER_USER_TYPES,
   UserType,
 } from '@/types/user';
 import { Button } from '@/components/ui/button';
@@ -24,6 +22,14 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import {
   Dialog,
   DialogContent,
@@ -41,7 +47,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -191,14 +196,11 @@ export default function AdminDashboard() {
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [selectedProperty, setSelectedProperty] = useState<PropertyWithDetails | null>(null);
 
-  const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
-  const [isPropertyDialogOpen, setIsPropertyDialogOpen] = useState(false);
   const [isBanDialogOpen, setIsBanDialogOpen] = useState(false);
   const [isVerifyDialogOpen, setIsVerifyDialogOpen] = useState(false);
   const [isDeleteUserDialogOpen, setIsDeleteUserDialogOpen] = useState(false);
   const [isDeletePropertyDialogOpen, setIsDeletePropertyDialogOpen] = useState(false);
   const [isRoleDialogOpen, setIsRoleDialogOpen] = useState(false);
-  const [isFeatureDialogOpen, setIsFeatureDialogOpen] = useState(false);
   const [isBulkActionDialogOpen, setIsBulkActionDialogOpen] = useState(false);
 
   const [verifyAction, setVerifyAction] = useState<'verify' | 'reject' | null>(null);
@@ -217,6 +219,20 @@ export default function AdminDashboard() {
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const initialFetchDone = useRef(false);
+
+  const toggleUserSelection = (userId: string) => {
+    setSelectedUsers((prev) =>
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+    );
+  };
+
+  const togglePropertySelection = (propertyId: string) => {
+    setSelectedProperties((prev) =>
+      prev.includes(propertyId)
+        ? prev.filter((id) => id !== propertyId)
+        : [...prev, propertyId]
+    );
+  };
 
   useEffect(() => {
     if (!isInitialized || authLoading) return;
@@ -252,7 +268,6 @@ export default function AdminDashboard() {
           propsRes,
           pendingPropsRes,
           activePropsRes,
-          reportedPropsRes,
           pendingReportsRes,
           openReportsRes,
           pendingVerifyRes,
@@ -269,7 +284,6 @@ export default function AdminDashboard() {
           supabase.from('properties').select('*', { count: 'exact', head: true }),
           supabase.from('properties').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
           supabase.from('properties').select('*', { count: 'exact', head: true }).eq('status', 'active'),
-          supabase.from('properties').select('*', { count: 'exact', head: true }).eq('status', 'reported'),
           supabase.from('reports').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
           supabase.from('reports').select('*', { count: 'exact', head: true }).eq('status', 'open'),
           supabase
@@ -1019,7 +1033,6 @@ export default function AdminDashboard() {
           </TabsTrigger>
         </TabsList>
 
-        {/* USERS */}
         <TabsContent value="users">
           <Card className="bg-card">
             <CardHeader className="space-y-3">
@@ -1077,7 +1090,6 @@ export default function AdminDashboard() {
                 </Alert>
               )}
 
-              {/* Mobile cards */}
               <div className="md:hidden space-y-3">
                 {paginatedUsers.length === 0 ? (
                   <p className="text-center text-muted-foreground py-8">No users found</p>
@@ -1138,16 +1150,6 @@ export default function AdminDashboard() {
                                 </Button>
                               </>
                             )}
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                setSelectedUser(u);
-                                setIsUserDialogOpen(true);
-                              }}
-                            >
-                              Details
-                            </Button>
                             {u.user_type !== 'admin' && (
                               <Button
                                 size="sm"
@@ -1169,7 +1171,6 @@ export default function AdminDashboard() {
                 )}
               </div>
 
-              {/* Desktop table */}
               <div className="hidden md:block overflow-x-auto">
                 <Table>
                   <TableHeader>
@@ -1205,10 +1206,7 @@ export default function AdminDashboard() {
                       paginatedUsers.map((u) => {
                         const canVerify = isPosterRole(u.user_type) && !u.is_verified;
                         return (
-                          <TableRow
-                            key={u.id}
-                            className={canVerify ? 'bg-purple-500/5' : ''}
-                          >
+                          <TableRow key={u.id} className={canVerify ? 'bg-purple-500/5' : ''}>
                             <TableCell>
                               <Checkbox
                                 checked={selectedUsers.includes(u.id)}
@@ -1274,14 +1272,6 @@ export default function AdminDashboard() {
                                 <DropdownMenuContent align="end" className="w-52">
                                   <DropdownMenuLabel>Actions</DropdownMenuLabel>
                                   <DropdownMenuSeparator />
-                                  <DropdownMenuItem
-                                    onClick={() => {
-                                      setSelectedUser(u);
-                                      setIsUserDialogOpen(true);
-                                    }}
-                                  >
-                                    <Eye className="mr-2 h-4 w-4" /> View details
-                                  </DropdownMenuItem>
                                   {u.user_type !== 'admin' && (
                                     <>
                                       <DropdownMenuItem
@@ -1369,7 +1359,6 @@ export default function AdminDashboard() {
           </Card>
         </TabsContent>
 
-        {/* PROPERTIES */}
         <TabsContent value="properties">
           <Card className="bg-card">
             <CardHeader className="space-y-3">
@@ -1519,14 +1508,6 @@ export default function AdminDashboard() {
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
-                                <DropdownMenuItem
-                                  onClick={() => {
-                                    setSelectedProperty(property);
-                                    setIsPropertyDialogOpen(true);
-                                  }}
-                                >
-                                  <Eye className="mr-2 h-4 w-4" /> Details
-                                </DropdownMenuItem>
                                 <DropdownMenuItem asChild>
                                   <a href={`/properties/${property.id}`} target="_blank" rel="noreferrer">
                                     <Globe className="mr-2 h-4 w-4" /> Public view
@@ -1576,7 +1557,6 @@ export default function AdminDashboard() {
           </Card>
         </TabsContent>
 
-        {/* VERIFICATIONS */}
         <TabsContent value="verifications">
           <Card className="bg-card">
             <CardHeader>
@@ -1655,7 +1635,6 @@ export default function AdminDashboard() {
           </Card>
         </TabsContent>
 
-        {/* REPORTS */}
         <TabsContent value="reports">
           <Card className="bg-card">
             <CardHeader>
@@ -1682,12 +1661,9 @@ export default function AdminDashboard() {
                             <p className="font-medium truncate">
                               {report.property?.title || 'Unknown listing'}
                             </p>
-                            <p className="text-sm text-muted-foreground">
-                              Reason: {report.reason}
-                            </p>
+                            <p className="text-sm text-muted-foreground">Reason: {report.reason}</p>
                             <p className="text-xs text-muted-foreground">
-                              by {report.reporter?.full_name || 'Anonymous'} ·{' '}
-                              {formatDate(report.created_at)}
+                              by {report.reporter?.full_name || 'Anonymous'} · {formatDate(report.created_at)}
                             </p>
                           </div>
                           <div className="flex gap-2 shrink-0">
@@ -1698,11 +1674,7 @@ export default function AdminDashboard() {
                             >
                               Resolve
                             </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleDismissReport(report.id)}
-                            >
+                            <Button size="sm" variant="outline" onClick={() => handleDismissReport(report.id)}>
                               Dismiss
                             </Button>
                           </div>
@@ -1716,7 +1688,6 @@ export default function AdminDashboard() {
           </Card>
         </TabsContent>
 
-        {/* ACTIVITY */}
         <TabsContent value="activity">
           <Card className="bg-card">
             <CardHeader>
@@ -1732,10 +1703,7 @@ export default function AdminDashboard() {
               ) : (
                 <div className="space-y-2 max-h-96 overflow-y-auto">
                   {activityLog.map((log) => (
-                    <div
-                      key={log.id}
-                      className="flex items-start gap-3 p-2 rounded-lg hover:bg-muted/50"
-                    >
+                    <div key={log.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-muted/50">
                       <div className="shrink-0 mt-0.5">{getActionIcon(log.action)}</div>
                       <div className="min-w-0 flex-1">
                         <p className="text-sm">
@@ -1743,8 +1711,7 @@ export default function AdminDashboard() {
                           <span className="text-muted-foreground"> · {log.target_type}</span>
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {log.admin?.full_name || log.admin?.email || 'Admin'} ·{' '}
-                          {formatDate(log.created_at)}
+                          {log.admin?.full_name || log.admin?.email || 'Admin'} · {formatDate(log.created_at)}
                         </p>
                       </div>
                     </div>
@@ -1756,7 +1723,6 @@ export default function AdminDashboard() {
         </TabsContent>
       </Tabs>
 
-      {/* Verify dialog */}
       <Dialog open={isVerifyDialogOpen} onOpenChange={setIsVerifyDialogOpen}>
         <DialogContent className="max-w-[95vw] sm:max-w-md">
           <DialogHeader>
@@ -1788,9 +1754,7 @@ export default function AdminDashboard() {
               Cancel
             </Button>
             <Button
-              className={
-                verifyAction === 'verify' ? 'bg-green-600 hover:bg-green-700 text-white' : ''
-              }
+              className={verifyAction === 'verify' ? 'bg-green-600 hover:bg-green-700 text-white' : ''}
               variant={verifyAction === 'verify' ? 'default' : 'destructive'}
               disabled={isProcessing}
               onClick={() => {
@@ -1803,7 +1767,6 @@ export default function AdminDashboard() {
         </DialogContent>
       </Dialog>
 
-      {/* Role dialog */}
       <Dialog open={isRoleDialogOpen} onOpenChange={setIsRoleDialogOpen}>
         <DialogContent className="max-w-[95vw] sm:max-w-md">
           <DialogHeader>
@@ -1838,7 +1801,6 @@ export default function AdminDashboard() {
         </DialogContent>
       </Dialog>
 
-      {/* Ban dialog */}
       <Dialog open={isBanDialogOpen} onOpenChange={setIsBanDialogOpen}>
         <DialogContent className="max-w-[95vw] sm:max-w-md">
           <DialogHeader>
@@ -1867,7 +1829,6 @@ export default function AdminDashboard() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete user */}
       <Dialog open={isDeleteUserDialogOpen} onOpenChange={setIsDeleteUserDialogOpen}>
         <DialogContent className="max-w-[95vw] sm:max-w-md">
           <DialogHeader>
@@ -1891,14 +1852,11 @@ export default function AdminDashboard() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete property */}
       <Dialog open={isDeletePropertyDialogOpen} onOpenChange={setIsDeletePropertyDialogOpen}>
         <DialogContent className="max-w-[95vw] sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="text-red-600 dark:text-red-400">Delete property</DialogTitle>
-            <DialogDescription>
-              Delete “{selectedProperty?.title}” and its photos.
-            </DialogDescription>
+            <DialogDescription>Delete “{selectedProperty?.title}” and its photos.</DialogDescription>
           </DialogHeader>
           <DialogFooter className="flex-col sm:flex-row gap-2">
             <Button variant="outline" onClick={() => setIsDeletePropertyDialogOpen(false)}>
@@ -1915,7 +1873,6 @@ export default function AdminDashboard() {
         </DialogContent>
       </Dialog>
 
-      {/* Bulk */}
       <Dialog open={isBulkActionDialogOpen} onOpenChange={setIsBulkActionDialogOpen}>
         <DialogContent className="max-w-[95vw] sm:max-w-md">
           <DialogHeader>
@@ -1982,9 +1939,7 @@ function StatCard({
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
             <p className="text-xs sm:text-sm text-muted-foreground truncate">{label}</p>
-            <p className={`text-xl sm:text-2xl font-bold ${valueClass}`}>
-              {value.toLocaleString()}
-            </p>
+            <p className={`text-xl sm:text-2xl font-bold ${valueClass}`}>{value.toLocaleString()}</p>
             {sub && <p className="text-[10px] sm:text-xs text-muted-foreground">{sub}</p>}
           </div>
           <Icon className="h-7 w-7 sm:h-8 sm:w-8 opacity-40 shrink-0" />
