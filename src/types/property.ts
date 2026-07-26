@@ -1,22 +1,61 @@
 // src/types/property.ts
-// Ekhaya hybrid model — aligned with DOC-001 / DOC-005 while preserving existing data shape
+// Ekhaya listing model — approved enum + field matrix (MVP: residential + land)
 
-/** Listing category (Buy / Rent / Land) — documents */
-export type ListingType = 'buy' | 'rent' | 'land';
+/** How the deal works */
+export type ListingIntent = 'sale' | 'long_rent' | 'short_stay'; // short_stay = Phase 3
 
-/** Legacy property_type values still present in the database */
+/** What the asset is */
+export type AssetCategory = 'residential' | 'land' | 'commercial'; // commercial = Phase 2
+
+/** Residential subtypes (MVP) */
+export type ResidentialSubtype =
+  | 'house'
+  | 'apartment'
+  | 'backrooms'
+  | 'shared'
+  | 'townhouse'
+  | 'other_residential';
+
+/** Land subtypes (MVP) */
+export type LandSubtype =
+  | 'residential_plot'
+  | 'commercial_plot'
+  | 'agricultural'
+  | 'other_land';
+
+/** Commercial subtypes (Phase 2 — defined for forward compat) */
+export type CommercialSubtype =
+  | 'office'
+  | 'retail'
+  | 'warehouse'
+  | 'mixed_use'
+  | 'other_commercial';
+
+export type PropertySubtype = ResidentialSubtype | LandSubtype | CommercialSubtype;
+
+/**
+ * Legacy property_type values still present in the database.
+ * Prefer property_subtype + asset_category going forward.
+ */
 export type PropertyType =
   | 'house'
   | 'flat/apartment'
   | 'shared'
   | 'backrooms'
   | 'other'
-  | ListingType; // allow new values during transition
+  | PropertySubtype
+  | 'buy'
+  | 'rent'
+  | 'land';
 
-/** Land tenure — mandatory on every listing (DOC-001 FR-005 / DOC-005) */
+/** @deprecated use ListingIntent — kept for older code paths */
+export type ListingType = 'buy' | 'rent' | 'land';
+
+/** Land tenure — mandatory on every listing */
 export type TenureType = 'title_deed' | 'leasehold' | 'snl' | 'unsure';
 
-/** Expanded status enum from DOC-005 */
+export type PricePeriod = 'month' | 'year' | 'once' | 'night';
+
 export type PropertyStatus =
   | 'pending'
   | 'active'
@@ -24,42 +63,58 @@ export type PropertyStatus =
   | 'hidden'
   | 'taken'
   | 'deleted'
-  // legacy values still present in data
+  | 'draft'
   | 'rejected'
   | 'rented'
   | 'reported';
 
 export interface Property {
   id: string;
-  /** Owner / poster — kept as landlord_id for backward compatibility */
   landlord_id: string;
   title: string;
   description: string;
+
+  /** New model */
+  listing_intent?: ListingIntent;
+  asset_category?: AssetCategory;
+  property_subtype?: PropertySubtype;
+
+  /** Legacy — still written for compatibility */
   property_type: PropertyType;
-  /** New field from documents — will be populated going forward */
   listing_type?: ListingType;
+
   price: number;
-  /** month | year | once (for buy/land) */
-  price_period?: 'month' | 'year' | 'once';
+  price_period?: PricePeriod;
+
   location_city: string;
   location_suburb: string;
   location_address?: string;
-  /** Future FK to areas table */
   area_id?: string;
   latitude?: number;
   longitude?: number;
+
+  /** Residential */
   bedrooms?: number;
   bathrooms?: number;
   size_sqm?: number;
-  is_furnished: boolean;
+  is_furnished?: boolean;
+
+  /** Land (MVP) */
+  land_size_ha?: number;
+  land_size_sqm?: number;
+  is_fenced?: boolean;
+  has_road_access?: boolean;
+  has_water?: boolean;
+  has_electricity?: boolean;
+  has_sewer?: boolean;
+  zoning_notes?: string;
+
   amenities: string[];
   lease_terms?: string;
-  /** Mandatory land tenure badge */
   tenure_type?: TenureType;
   status: PropertyStatus;
   is_featured: boolean;
   views: number;
-  /** Denormalised counters (DOC-005) */
   save_count?: number;
   contact_count?: number;
   report_count?: number;
@@ -95,14 +150,17 @@ export interface PropertyFilters {
   maxPrice?: number;
   bedrooms?: number;
   propertyType?: PropertyType[];
-  listingType?: ListingType[];
+  listingIntent?: ListingIntent[];
+  assetCategory?: AssetCategory[];
+  propertySubtype?: PropertySubtype[];
   tenureType?: TenureType[];
   amenities?: string[];
   furnished?: boolean;
+  minLandHa?: number;
+  maxLandHa?: number;
   keyword?: string;
 }
 
-// Extended types for property detail page
 export interface ExtendedProperty extends Property {
   landlord: {
     full_name: string;
@@ -122,7 +180,6 @@ export interface PropertyCardProps {
   onViewDetails?: (id: string) => void;
 }
 
-// Property detail page types
 export interface NearbyPlace {
   type: string;
   name: string;
@@ -151,7 +208,6 @@ export interface Inquiry {
   created_at: string;
 }
 
-/** Tenure badge display helpers (semantic colours from documents) */
 export const TENURE_CONFIG: Record<
   TenureType,
   { label: string; bg: string; text: string; icon: string }
@@ -181,3 +237,122 @@ export const TENURE_CONFIG: Record<
     icon: 'HelpCircle',
   },
 };
+
+export const LISTING_INTENT_LABELS: Record<ListingIntent, string> = {
+  sale: 'For sale',
+  long_rent: 'Long-term rent',
+  short_stay: 'Short stay',
+};
+
+export const ASSET_CATEGORY_LABELS: Record<AssetCategory, string> = {
+  residential: 'Residential',
+  land: 'Land / plot',
+  commercial: 'Commercial',
+};
+
+export const RESIDENTIAL_SUBTYPE_LABELS: Record<ResidentialSubtype, string> = {
+  house: 'House',
+  apartment: 'Flat / apartment',
+  backrooms: 'Backrooms / cottage',
+  shared: 'Shared / room',
+  townhouse: 'Townhouse',
+  other_residential: 'Other residential',
+};
+
+export const LAND_SUBTYPE_LABELS: Record<LandSubtype, string> = {
+  residential_plot: 'Residential plot',
+  commercial_plot: 'Commercial plot',
+  agricultural: 'Agricultural land',
+  other_land: 'Other land',
+};
+
+export const COMMERCIAL_SUBTYPE_LABELS: Record<CommercialSubtype, string> = {
+  office: 'Office',
+  retail: 'Retail / shop',
+  warehouse: 'Warehouse / industrial',
+  mixed_use: 'Mixed use',
+  other_commercial: 'Other commercial',
+};
+
+/** Default price period from intent */
+export function defaultPricePeriod(intent: ListingIntent): PricePeriod {
+  switch (intent) {
+    case 'sale':
+      return 'once';
+    case 'short_stay':
+      return 'night';
+    case 'long_rent':
+    default:
+      return 'month';
+  }
+}
+
+/** Map subtype → legacy property_type for DB rows that still use it */
+export function subtypeToLegacyPropertyType(subtype: PropertySubtype | string): string {
+  switch (subtype) {
+    case 'apartment':
+      return 'flat/apartment';
+    case 'house':
+    case 'backrooms':
+    case 'shared':
+      return subtype;
+    case 'townhouse':
+    case 'other_residential':
+      return 'other';
+    case 'residential_plot':
+    case 'commercial_plot':
+    case 'agricultural':
+    case 'other_land':
+      return 'land';
+    default:
+      return 'other';
+  }
+}
+
+/** Derive asset category from legacy property_type if new fields missing */
+export function inferAssetCategory(p: {
+  asset_category?: string | null;
+  property_type?: string | null;
+  listing_type?: string | null;
+}): AssetCategory {
+  if (p.asset_category === 'residential' || p.asset_category === 'land' || p.asset_category === 'commercial') {
+    return p.asset_category;
+  }
+  if (p.listing_type === 'land' || p.property_type === 'land') return 'land';
+  if (
+    p.property_type === 'residential_plot' ||
+    p.property_type === 'commercial_plot' ||
+    p.property_type === 'agricultural' ||
+    p.property_type === 'other_land'
+  ) {
+    return 'land';
+  }
+  return 'residential';
+}
+
+export function inferListingIntent(p: {
+  listing_intent?: string | null;
+  listing_type?: string | null;
+  price_period?: string | null;
+}): ListingIntent {
+  if (p.listing_intent === 'sale' || p.listing_intent === 'long_rent' || p.listing_intent === 'short_stay') {
+    return p.listing_intent;
+  }
+  if (p.listing_type === 'buy' || p.price_period === 'once') return 'sale';
+  if (p.price_period === 'night') return 'short_stay';
+  return 'long_rent';
+}
+
+export function formatPricePeriod(period?: PricePeriod | null): string {
+  switch (period) {
+    case 'once':
+      return '';
+    case 'year':
+      return '/year';
+    case 'night':
+      return '/night';
+    case 'month':
+    default:
+      return '/month';
+  }
+}

@@ -1,46 +1,103 @@
 // src/utils/constants.ts
 
-// Eswatini-specific constants
 export const ESWATINI_CITIES = [
-  'Manzini', 'Mbabane', 'Matsapha', 'Nhlangano', 'Siteki',
-  'Big Bend', 'Ezulwini', 'Lobamba', 'Piggs Peak', 'Kwaluseni',
-  'Hlatikulu', 'Mhlume', 'Simunye'
+  'Manzini',
+  'Mbabane',
+  'Matsapha',
+  'Nhlangano',
+  'Siteki',
+  'Big Bend',
+  'Ezulwini',
+  'Lobamba',
+  'Piggs Peak',
+  'Kwaluseni',
+  'Hlatikulu',
+  'Mhlume',
+  'Simunye',
 ] as const;
 
-/** Legacy property types still in use */
+/** @deprecated prefer RESIDENTIAL_SUBTYPES / LAND_SUBTYPES */
 export const PROPERTY_TYPES = [
-  'house', 'flat/apartment', 'shared', 'backrooms', 'other'
+  'house',
+  'flat/apartment',
+  'shared',
+  'backrooms',
+  'other',
 ] as const;
 
-/** Document-aligned listing categories (Buy / Rent / Land) */
+/** @deprecated prefer LISTING_INTENTS */
 export const LISTING_TYPES = ['buy', 'rent', 'land'] as const;
 
-/** Mandatory land tenure values (DOC-001 FR-005) */
-export const TENURE_TYPES = [
-  'title_deed', 'leasehold', 'snl', 'unsure'
+export const LISTING_INTENTS = ['sale', 'long_rent'] as const; // short_stay Phase 3
+
+export const ASSET_CATEGORIES = ['residential', 'land'] as const; // commercial Phase 2
+
+export const RESIDENTIAL_SUBTYPES = [
+  'house',
+  'apartment',
+  'backrooms',
+  'shared',
+  'townhouse',
+  'other_residential',
 ] as const;
 
-export const ESWATINI_AMENITIES = [
-  'Parking', 'Own Electricity Meter', 'Shared Electricity Meter', 'Security',
-  'Own Water Meter', 'Fully Fitted', 'Pet Friendly', 'Shower', 'Bathtub'
+export const LAND_SUBTYPES = [
+  'residential_plot',
+  'commercial_plot',
+  'agricultural',
+  'other_land',
 ] as const;
 
-// File upload limits
-export const MAX_PHOTOS = 10; // aligned with documents (was 8)
-export const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
-export const MAX_DOCUMENT_SIZE = 10 * 1024 * 1024; // 10MB
+export const TENURE_TYPES = ['title_deed', 'leasehold', 'snl', 'unsure'] as const;
 
-// Eswatini phone number validation
+/** Residential amenities (MVP) */
+export const RESIDENTIAL_AMENITIES = [
+  'Water tank',
+  'Borehole',
+  'Solar',
+  'Prepaid electricity',
+  'Security / guard',
+  'Boundary wall',
+  'Parking',
+  'Garage',
+  'Garden',
+  'Staff quarters',
+  'Fibre / Wi-Fi',
+  'Backup power',
+  'Pet friendly',
+  'Own electricity meter',
+  'Shared electricity meter',
+  'Own water meter',
+  'Shower',
+  'Bathtub',
+] as const;
+
+/** Land amenities (MVP) */
+export const LAND_AMENITIES = [
+  'Fenced',
+  'Gate',
+  'Gravel access',
+  'Tar access',
+  'Corner stand',
+  'Flat / level',
+  'Services on boundary',
+  'Surveyed / beacons',
+] as const;
+
+/** @deprecated use RESIDENTIAL_AMENITIES */
+export const ESWATINI_AMENITIES = RESIDENTIAL_AMENITIES;
+
+export const MAX_PHOTOS = 10;
+export const MAX_FILE_SIZE = 5 * 1024 * 1024;
+export const MAX_DOCUMENT_SIZE = 10 * 1024 * 1024;
+
 export const ESWATINI_PHONE_REGEX = /^(\+268)?[7-9][0-9]{7}$/;
 
-// Price check debounce
 export const PRICE_CHECK_DEBOUNCE = 800;
 
-// Room options
 export const ROOM_OPTIONS = ['0', '1', '2', '3', '4', '5'] as const;
 export const BATH_OPTIONS = ['0', '1', '2', '3', '4'] as const;
 
-/** Expanded status set from DOC-005 (legacy values retained for existing rows) */
 export const PROPERTY_STATUSES = {
   PENDING: 'pending',
   ACTIVE: 'active',
@@ -48,15 +105,12 @@ export const PROPERTY_STATUSES = {
   HIDDEN: 'hidden',
   TAKEN: 'taken',
   DELETED: 'deleted',
-  // legacy
+  DRAFT: 'draft',
   RENTED: 'rented',
   REJECTED: 'rejected',
   REPORTED: 'reported',
 } as const;
 
-// Eswatini country code (for phone formatting)
 export const ESWATINI_COUNTRY_CODE = '268';
-
-// Currency symbol
 export const CURRENCY_SYMBOL = 'E';
-export const CURRENCY_CODE = 'SZL'; // Swazi Lilangeni
+export const CURRENCY_CODE = 'SZL';
