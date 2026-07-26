@@ -85,7 +85,9 @@ export default function SignUpForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
-  const [successState, setSuccessState] = useState<{ type: 'verification'; message: string } | null>(null);
+  const [successState, setSuccessState] = useState<{ type: 'verification'; message: string } | null>(
+    null
+  );
   const [isMounted, setIsMounted] = useState(false);
 
   const initialTypeParam = searchParams.get('type');
