@@ -3,5 +3,13 @@ Allow: /
 Disallow: /dashboard/
 Disallow: /api/
 Disallow: /auth/
+Disallow: /profile
+
+User-agent: Googlebot
+Allow: /
+Disallow: /dashboard/
+Disallow: /api/
+Disallow: /auth/
+Disallow: /profile
 
 Sitemap: https://eswaproperty.vercel.app/sitemap.xml
