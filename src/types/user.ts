@@ -1,11 +1,11 @@
 // src/types/user.ts
-// Ekhaya personas (DOC-aligned + product decision):
-//   seeker   — renter / buyer
-//   landlord — property owner who lists themselves
-//   broker   — facilitator hired to find tenants
-//   agent    — professional estate agent
-//   admin    — platform operator
-// Legacy: 'renter' reads as seeker. 'landlord' is canonical (not mapped away).
+// Ekhaya personas (canonical):
+//   seeker   — renter / buyer looking for property
+//   landlord — property owner who posts themselves
+//   broker   — facilitator hired to find tenants/buyers
+//   agent    — licensed / established estate agent
+//   admin    — platform admin
+// Legacy 'renter' still accepted and normalised to seeker.
 
 export type UserType =
   | 'seeker'
@@ -13,13 +13,9 @@ export type UserType =
   | 'broker'
   | 'agent'
   | 'admin'
-  | 'renter'; // legacy only — normalize to seeker
+  | 'renter'; // legacy only — normalised to seeker on read
 
-export type PosterRole = 'landlord' | 'broker' | 'agent' | 'admin';
-
-export type LegacyUserType = UserType;
-
-export const POSTER_ROLES: UserType[] = ['landlord', 'broker', 'agent', 'admin'];
+export type CanonicalUserType = 'seeker' | 'landlord' | 'broker' | 'agent' | 'admin';
 
 export const isValidUserType = (type: string | null | undefined): type is UserType => {
   return (
@@ -33,9 +29,9 @@ export const isValidUserType = (type: string | null | undefined): type is UserTy
 };
 
 /**
- * Normalise stored roles.
- * - renter → seeker (legacy only)
- * - landlord stays landlord (first-class)
+ * Normalises stored role values.
+ * - renter → seeker (legacy rename only)
+ * - landlord stays landlord (first-class poster role)
  */
 export const normalizeUserType = (type: string | null | undefined): UserType => {
   if (!type) return 'seeker';
@@ -50,8 +46,8 @@ export const getDefaultRedirect = (userType: UserType | null): string => {
     case 'admin':
       return '/dashboard/admin';
     case 'landlord':
-    case 'broker':
     case 'agent':
+    case 'broker':
       return '/dashboard/landlord';
     case 'seeker':
     default:
@@ -66,12 +62,12 @@ export const getUserTypeLabel = (userType: UserType | null): string => {
   switch (t) {
     case 'admin':
       return 'Administrator';
+    case 'landlord':
+      return 'Landlord';
     case 'agent':
       return 'Agent';
     case 'broker':
       return 'Broker';
-    case 'landlord':
-      return 'Landlord';
     case 'seeker':
       return 'Seeker';
     default:
@@ -84,12 +80,12 @@ export const getUserTypeIcon = (userType: UserType | null): string => {
   switch (t) {
     case 'admin':
       return '👑';
+    case 'landlord':
+      return '🏠';
     case 'agent':
       return '🏢';
     case 'broker':
       return '🤝';
-    case 'landlord':
-      return '🏠';
     case 'seeker':
       return '🔍';
     default:
@@ -100,7 +96,13 @@ export const getUserTypeIcon = (userType: UserType | null): string => {
 /** Roles allowed to post listings (phone verification still required to publish) */
 export const canPostListings = (userType: UserType | null): boolean => {
   const t = normalizeUserType(userType);
-  return t === 'landlord' || t === 'broker' || t === 'agent' || t === 'admin';
+  return t === 'landlord' || t === 'agent' || t === 'broker' || t === 'admin';
+};
+
+/** Poster roles that may need verification */
+export const isPosterRole = (userType: UserType | null): boolean => {
+  const t = normalizeUserType(userType);
+  return t === 'landlord' || t === 'agent' || t === 'broker';
 };
 
 /** Seeker (includes legacy renter) */
@@ -108,8 +110,13 @@ export const isSeekerRole = (userType: UserType | null): boolean => {
   return normalizeUserType(userType) === 'seeker';
 };
 
-/** Poster roles that need admin verification */
-export const isPosterRole = (userType: UserType | null): boolean => {
-  const t = normalizeUserType(userType);
-  return t === 'landlord' || t === 'broker' || t === 'agent';
-};
+/** All filterable roles for admin UI */
+export const ADMIN_USER_TYPE_FILTERS: { value: string; label: string }[] = [
+  { value: 'all', label: 'All users' },
+  { value: 'seeker', label: 'Seekers' },
+  { value: 'landlord', label: 'Landlords' },
+  { value: 'broker', label: 'Brokers' },
+  { value: 'agent', label: 'Agents' },
+  { value: 'admin', label: 'Admins' },
+  { value: 'renter', label: 'Renters (legacy)' },
+];

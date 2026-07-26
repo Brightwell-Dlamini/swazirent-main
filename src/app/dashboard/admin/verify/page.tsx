@@ -1,48 +1,53 @@
 // src/app/dashboard/admin/verify/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
+import { canPostListings, getUserTypeLabel, normalizeUserType, UserType } from '@/types/user';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { 
-  CheckCircle, 
-  XCircle, 
-  Loader2, 
-  Users, 
+import {
+  CheckCircle,
+  XCircle,
+  Loader2,
+  Users,
   Clock,
   AlertCircle,
   Shield,
   UserCheck,
   UserX,
   RefreshCw,
+  ChevronLeft,
 } from 'lucide-react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-interface LandlordProfile {
+interface PosterProfile {
   id: string;
   email: string;
-  full_name: string;
-  phone: string;
+  full_name: string | null;
+  phone: string | null;
+  user_type: string;
   is_verified: boolean;
-  verification_level: string;
+  verification_level: string | null;
   created_at: string;
   property_count: number;
 }
 
+const POSTER_TYPES = ['landlord', 'broker', 'agent'] as const;
+
 export default function AdminVerificationPage() {
   const { user, userType, isLoading } = useAuth();
   const router = useRouter();
-  const [landlords, setLandlords] = useState<LandlordProfile[]>([]);
+  const [posters, setPosters] = useState<PosterProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('pending');
 
-  // ✅ FIXED: Use router.push instead of window.location.href
   useEffect(() => {
     if (!isLoading && userType !== 'admin') {
       router.push('/dashboard');
@@ -50,70 +55,70 @@ export default function AdminVerificationPage() {
     }
   }, [userType, isLoading, router]);
 
-  const fetchLandlords = async () => {
+  const fetchPosters = useCallback(async () => {
     setLoading(true);
     try {
-      // ✅ FIXED: Show ALL landlords, with verification status
       const { data, error } = await supabase
         .from('profiles')
-        .select(`
+        .select(
+          `
           id,
           email,
           full_name,
           phone,
+          user_type,
           is_verified,
           verification_level,
           created_at,
           properties:properties(count)
-        `)
-        .eq('user_type', 'landlord')
+        `
+        )
+        .in('user_type', [...POSTER_TYPES])
         .order('created_at', { ascending: false });
 
       if (error) throw error;
 
-      const formattedData = data?.map((item: any) => ({
-        ...item,
-        property_count: item.properties?.[0]?.count || 0
-      })) || [];
+      const formattedData =
+        data?.map((item: any) => ({
+          ...item,
+          property_count: item.properties?.[0]?.count || 0,
+        })) || [];
 
-      setLandlords(formattedData);
+      setPosters(formattedData);
     } catch (error) {
-      console.error('Error fetching landlords:', error);
-      toast.error('Failed to load landlords');
+      console.error('Error fetching posters:', error);
+      toast.error('Failed to load accounts for verification');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   const handleVerify = async (userId: string, action: 'verify' | 'reject') => {
     setProcessing(userId);
     try {
       const now = new Date().toISOString();
-      let updateData: any = {
-        updated_at: now,
-        verified_by: user?.id,
-        verified_at: now,
-      };
+      const updateData =
+        action === 'verify'
+          ? {
+              is_verified: true,
+              verification_level: 'verified',
+              verified_by: user?.id,
+              verified_at: now,
+              updated_at: now,
+            }
+          : {
+              is_verified: false,
+              verification_level: 'rejected',
+              verified_by: user?.id,
+              verified_at: now,
+              updated_at: now,
+            };
 
-      if (action === 'verify') {
-        updateData.is_verified = true;
-        updateData.verification_level = 'verified';
-      } else {
-        updateData.is_verified = false;
-        updateData.verification_level = 'rejected';
-      }
-
-      const { error } = await supabase
-        .from('profiles')
-        .update(updateData)
-        .eq('id', userId);
-
+      const { error } = await supabase.from('profiles').update(updateData).eq('id', userId);
       if (error) throw error;
 
-      toast.success(`Landlord ${action === 'verify' ? 'verified' : 'rejected'} successfully`);
-      
-      // Refresh the list
-      await fetchLandlords();
+      toast.success(`Account ${action === 'verify' ? 'verified' : 'rejected'} successfully`);
+      await fetchPosters();
     } catch (error) {
       console.error('Error updating verification:', error);
       toast.error('Failed to update verification status');
@@ -121,6 +126,8 @@ export default function AdminVerificationPage() {
       setProcessing(null);
     }
   };
+
+  const fetchPosters = fetchLandlords;
 
   useEffect(() => {
     if (userType === 'admin') {
@@ -138,15 +145,14 @@ export default function AdminVerificationPage() {
     );
   }
 
-  // ✅ FIXED: Count unverified landlords properly
   const stats = {
     total: landlords.length,
-    verified: landlords.filter(l => l.is_verified).length,
-    unverified: landlords.filter(l => !l.is_verified).length,
-    rejected: landlords.filter(l => l.verification_level === 'rejected').length,
+    verified: landlords.filter((l) => l.is_verified).length,
+    unverified: landlords.filter((l) => !l.is_verified && l.verification_level !== 'rejected').length,
+    rejected: landlords.filter((l) => l.verification_level === 'rejected').length,
   };
 
-  const filteredLandlords = landlords.filter(l => {
+  const filteredLandlords = landlords.filter((l) => {
     if (activeTab === 'verified') return l.is_verified;
     if (activeTab === 'unverified') return !l.is_verified && l.verification_level !== 'rejected';
     if (activeTab === 'rejected') return l.verification_level === 'rejected';
@@ -155,230 +161,177 @@ export default function AdminVerificationPage() {
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-5xl">
-      <div className="flex justify-between items-center mb-8">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-8">
         <div>
-          <h1 className="text-3xl font-bold flex items-center gap-2">
-            <Shield className="h-8 w-8 text-primary" />
-            Landlord Verification
+          <Button variant="ghost" size="sm" className="mb-2 -ml-2" asChild>
+            <a href="/dashboard/admin">← Back to admin</a>
+          </Button>
+          <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
+            <Shield className="h-7 w-7 text-primary" />
+            Poster verification
           </h1>
-          <p className="text-gray-600">Review and manage landlord account verifications</p>
+          <p className="text-muted-foreground text-sm sm:text-base">
+            Verify landlords, brokers, and agents before they publish
+          </p>
         </div>
-        <Button onClick={fetchLandlords} variant="outline" disabled={loading}>
+        <Button onClick={fetchLandlords} variant="outline" disabled={loading} className="self-start">
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
         </Button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex justify-between items-center">
-              <div>
-                <p className="text-sm text-gray-500">Total</p>
-                <p className="text-2xl font-bold">{stats.total}</p>
-              </div>
-              <Users className="h-8 w-8 text-primary opacity-50" />
-            </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mb-6">
+        <Card className="bg-card">
+          <CardContent className="p-3 sm:p-4">
+            <p className="text-xs sm:text-sm text-muted-foreground">Total posters</p>
+            <p className="text-xl sm:text-2xl font-bold">{stats.total}</p>
           </CardContent>
         </Card>
-        <Card className="border-green-200 bg-green-50">
-          <CardContent className="p-4">
-            <div className="flex justify-between items-center">
-              <div>
-                <p className="text-sm text-gray-500">Verified</p>
-                <p className="text-2xl font-bold text-green-600">{stats.verified}</p>
-              </div>
-              <UserCheck className="h-8 w-8 text-green-500 opacity-50" />
-            </div>
+        <Card className="border-green-500/30 bg-green-500/10">
+          <CardContent className="p-3 sm:p-4">
+            <p className="text-xs sm:text-sm text-muted-foreground">Verified</p>
+            <p className="text-xl sm:text-2xl font-bold text-green-600 dark:text-green-400">{stats.verified}</p>
           </CardContent>
         </Card>
-        <Card className="border-amber-200 bg-amber-50">
-          <CardContent className="p-4">
-            <div className="flex justify-between items-center">
-              <div>
-                <p className="text-sm text-gray-500">Unverified</p>
-                <p className="text-2xl font-bold text-amber-600">{stats.unverified}</p>
-              </div>
-              <Clock className="h-8 w-8 text-amber-500 opacity-50" />
-            </div>
+        <Card className="border-amber-500/30 bg-amber-500/10">
+          <CardContent className="p-3 sm:p-4">
+            <p className="text-xs sm:text-sm text-muted-foreground">Pending</p>
+            <p className="text-xl sm:text-2xl font-bold text-amber-600 dark:text-amber-400">{stats.unverified}</p>
           </CardContent>
         </Card>
-        <Card className="border-red-200 bg-red-50">
-          <CardContent className="p-4">
-            <div className="flex justify-between items-center">
-              <div>
-                <p className="text-sm text-gray-500">Rejected</p>
-                <p className="text-2xl font-bold text-red-600">{stats.rejected}</p>
-              </div>
-              <UserX className="h-8 w-8 text-red-500 opacity-50" />
-            </div>
+        <Card className="border-red-500/30 bg-red-500/10">
+          <CardContent className="p-3 sm:p-4">
+            <p className="text-xs sm:text-sm text-muted-foreground">Rejected</p>
+            <p className="text-xl sm:text-2xl font-bold text-red-600 dark:text-red-400">{stats.rejected}</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="mb-6">
-        <TabsList>
-          <TabsTrigger value="all">
-            All ({stats.total})
-          </TabsTrigger>
-          <TabsTrigger value="unverified">
-            Unverified ({stats.unverified})
-          </TabsTrigger>
-          <TabsTrigger value="verified">
-            Verified ({stats.verified})
-          </TabsTrigger>
-          <TabsTrigger value="rejected">
-            Rejected ({stats.rejected})
-          </TabsTrigger>
+        <TabsList className="w-full flex flex-wrap h-auto gap-1">
+          <TabsTrigger value="all" className="flex-1 min-w-[4.5rem]">All ({stats.total})</TabsTrigger>
+          <TabsTrigger value="unverified" className="flex-1 min-w-[4.5rem]">Pending ({stats.unverified})</TabsTrigger>
+          <TabsTrigger value="verified" className="flex-1 min-w-[4.5rem]">Verified ({stats.verified})</TabsTrigger>
+          <TabsTrigger value="rejected" className="flex-1 min-w-[4.5rem]">Rejected ({stats.rejected})</TabsTrigger>
         </TabsList>
       </Tabs>
 
-      {/* Landlord List */}
       {filteredLandlords.length === 0 ? (
         <Card>
-          <CardContent className="p-12 text-center">
-            <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <h2 className="text-2xl font-bold mb-2">No Landlords Found</h2>
-            <p className="text-gray-500">There are no landlords in this category.</p>
+          <CardContent className="p-8 sm:p-12 text-center">
+            <Users className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+            <h2 className="text-xl font-bold mb-2">No accounts found</h2>
+            <p className="text-muted-foreground">Nothing in this category.</p>
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-3">
           {filteredLandlords.map((landlord) => {
             const isVerified = landlord.is_verified;
             const level = landlord.verification_level;
-            
-            let statusColor = 'bg-amber-100 text-amber-800';
-            let statusLabel = '⏳ Unverified';
-            
+            let statusColor =
+              'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30';
+            let statusLabel = 'Pending';
             if (isVerified) {
-              statusColor = 'bg-green-100 text-green-800';
-              statusLabel = '✅ Verified';
+              statusColor = 'bg-green-500/15 text-green-700 dark:text-green-300 border-green-500/30';
+              statusLabel = 'Verified';
             } else if (level === 'rejected') {
-              statusColor = 'bg-red-100 text-red-800';
-              statusLabel = '❌ Rejected';
+              statusColor = 'bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/30';
+              statusLabel = 'Rejected';
             }
 
             return (
-              <Card key={landlord.id} className={!isVerified && level !== 'rejected' ? 'border-amber-300 bg-amber-50/30' : ''}>
-                <CardContent className="p-6">
-                  <div className="flex flex-col md:flex-row justify-between gap-4">
-                    <div className="space-y-2 flex-1">
+              <Card
+                key={landlord.id}
+                className={
+                  !isVerified && level !== 'rejected'
+                    ? 'border-amber-500/40 bg-amber-500/5'
+                    : 'bg-card'
+                }
+              >
+                <CardContent className="p-4 sm:p-6">
+                  <div className="flex flex-col sm:flex-row justify-between gap-4">
+                    <div className="space-y-1 flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="font-semibold text-lg">
-                          {landlord.full_name || 'Unknown User'}
+                        <h3 className="font-semibold text-base sm:text-lg truncate">
+                          {landlord.full_name || 'Unknown'}
                         </h3>
-                        <Badge className={statusColor}>
-                          {statusLabel}
-                        </Badge>
-                        {landlord.property_count > 0 && (
-                          <Badge variant="outline">
-                            {landlord.property_count} {landlord.property_count === 1 ? 'property' : 'properties'}
-                          </Badge>
-                        )}
+                        <Badge className={statusColor}>{statusLabel}</Badge>
                       </div>
-                      <p className="text-sm text-gray-600">{landlord.email}</p>
+                      <p className="text-sm text-muted-foreground truncate">{landlord.email}</p>
                       {landlord.phone && (
-                        <p className="text-sm text-gray-600">📞 {landlord.phone}</p>
+                        <p className="text-sm text-muted-foreground">{landlord.phone}</p>
                       )}
-                      <p className="text-sm text-gray-500">
-                        Joined: {new Date(landlord.created_at).toLocaleDateString()}
+                      <p className="text-xs text-muted-foreground">
+                        Joined {new Date(landlord.created_at).toLocaleDateString()}
                       </p>
-                      {!isVerified && level !== 'rejected' && (
-                        <p className="text-sm text-amber-600 flex items-center gap-1">
-                          <Clock className="h-3 w-3" />
-                          Awaiting verification
-                        </p>
-                      )}
-                      {level === 'rejected' && (
-                        <p className="text-sm text-red-600 flex items-center gap-1">
-                          <AlertCircle className="h-3 w-3" />
-                          Verification was rejected. Can be re-submitted.
-                        </p>
-                      )}
                     </div>
-                    
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      {!isVerified && level !== 'rejected' ? (
+                    <div className="flex flex-row sm:flex-col gap-2 shrink-0">
+                      {!isVerified && level !== 'rejected' && (
                         <>
                           <Button
+                            size="sm"
+                            className="flex-1 bg-green-600 hover:bg-green-700 text-white"
                             onClick={() => handleVerify(landlord.id, 'verify')}
                             disabled={processing === landlord.id}
-                            className="bg-green-600 hover:bg-green-700"
                           >
                             {processing === landlord.id ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
                               <>
-                                <CheckCircle className="mr-2 h-4 w-4" />
-                                Verify
+                                <CheckCircle className="mr-1 h-4 w-4" /> Verify
                               </>
                             )}
                           </Button>
                           <Button
+                            size="sm"
+                            variant="destructive"
+                            className="flex-1"
                             onClick={() => {
-                              if (confirm(`Reject ${landlord.full_name || 'this landlord'}?`)) {
+                              if (confirm(`Reject ${landlord.full_name || 'this account'}?`)) {
                                 handleVerify(landlord.id, 'reject');
                               }
                             }}
                             disabled={processing === landlord.id}
-                            variant="destructive"
                           >
-                            {processing === landlord.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <>
-                                <XCircle className="mr-2 h-4 w-4" />
-                                Reject
-                              </>
-                            )}
+                            <XCircle className="mr-1 h-4 w-4" /> Reject
                           </Button>
                         </>
-                      ) : isVerified ? (
+                      )}
+                      {isVerified && (
                         <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-red-600 dark:text-red-400"
                           onClick={() => {
-                            if (confirm(`Remove verification for ${landlord.full_name || 'this landlord'}?`)) {
+                            if (confirm(`Revoke verification for ${landlord.full_name || 'this account'}?`)) {
                               handleVerify(landlord.id, 'reject');
                             }
                           }}
                           disabled={processing === landlord.id}
-                          variant="outline"
-                          className="text-red-600 border-red-200 hover:bg-red-50"
                         >
-                          {processing === landlord.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <>
-                              <XCircle className="mr-2 h-4 w-4" />
-                              Revoke Verification
-                            </>
-                          )}
+                          <XCircle className="mr-1 h-4 w-4" /> Revoke
                         </Button>
-                      ) : level === 'rejected' ? (
+                      )}
+                      {level === 'rejected' && !isVerified && (
                         <Button
+                          size="sm"
+                          className="bg-green-600 hover:bg-green-700 text-white"
                           onClick={() => handleVerify(landlord.id, 'verify')}
                           disabled={processing === landlord.id}
-                          className="bg-green-600 hover:bg-green-700"
                         >
-                          {processing === landlord.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <>
-                              <CheckCircle className="mr-2 h-4 w-4" />
-                              Reconsider & Verify
-                            </>
-                          )}
+                          <CheckCircle className="mr-1 h-4 w-4" /> Verify
                         </Button>
-                      ) : null}
+                      )}
                     </div>
                   </div>
                 </CardContent>
               </Card>
-            );
-          })}
-        </div>
-      )}
+                  );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
     </div>
   );
 }
