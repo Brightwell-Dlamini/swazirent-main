@@ -1,2 +1,3 @@
-// TEMP - will replace
-export default function AdminDashboard() { return null; }
+'use client';
+
+export { default } from './AdminDashboardClient';
