@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
-import { getUserTypeLabel, isPosterRole, POSTER_USER_TYPES } from '@/types/user';
+import { getUserTypeLabel, POSTER_USER_TYPES } from '@/types/user';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -16,11 +16,7 @@ import {
   XCircle,
   Loader2,
   Users,
-  Clock,
-  AlertCircle,
   Shield,
-  UserCheck,
-  UserX,
   RefreshCw,
   ChevronLeft,
 } from 'lucide-react';
@@ -158,7 +154,7 @@ export default function AdminVerificationPage() {
             Verify landlords, brokers, and agents
           </p>
         </div>
-        <Button onClick={fetchPosters} variant="outline" size="sm" disabled={loading} className="self-start">
+        <Button onClick={fetchPosters} variant="outline" size="sm" disabled={loading}>
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
         </Button>
       </div>
@@ -173,29 +169,43 @@ export default function AdminVerificationPage() {
         <Card className="border-green-500/30 bg-green-500/10">
           <CardContent className="p-3 sm:p-4">
             <p className="text-xs sm:text-sm text-muted-foreground">Verified</p>
-            <p className="text-xl sm:text-2xl font-bold text-green-600 dark:text-green-400">{stats.verified}</p>
+            <p className="text-xl sm:text-2xl font-bold text-green-600 dark:text-green-400">
+              {stats.verified}
+            </p>
           </CardContent>
         </Card>
         <Card className="border-amber-500/30 bg-amber-500/10">
           <CardContent className="p-3 sm:p-4">
             <p className="text-xs sm:text-sm text-muted-foreground">Pending</p>
-            <p className="text-xl sm:text-2xl font-bold text-amber-600 dark:text-amber-400">{stats.unverified}</p>
+            <p className="text-xl sm:text-2xl font-bold text-amber-600 dark:text-amber-400">
+              {stats.unverified}
+            </p>
           </CardContent>
         </Card>
         <Card className="border-red-500/30 bg-red-500/10">
           <CardContent className="p-3 sm:p-4">
             <p className="text-xs sm:text-sm text-muted-foreground">Rejected</p>
-            <p className="text-xl sm:text-2xl font-bold text-red-600 dark:text-red-400">{stats.rejected}</p>
+            <p className="text-xl sm:text-2xl font-bold text-red-600 dark:text-red-400">
+              {stats.rejected}
+            </p>
           </CardContent>
         </Card>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="mb-6">
         <TabsList className="w-full h-auto flex flex-wrap gap-1">
-          <TabsTrigger value="all" className="flex-1 min-w-[4rem]">All ({stats.total})</TabsTrigger>
-          <TabsTrigger value="unverified" className="flex-1 min-w-[4rem]">Pending ({stats.unverified})</TabsTrigger>
-          <TabsTrigger value="verified" className="flex-1 min-w-[4rem]">Verified ({stats.verified})</TabsTrigger>
-          <TabsTrigger value="rejected" className="flex-1 min-w-[4rem]">Rejected ({stats.rejected})</TabsTrigger>
+          <TabsTrigger value="all" className="flex-1 min-w-[4rem]">
+            All ({stats.total})
+          </TabsTrigger>
+          <TabsTrigger value="unverified" className="flex-1 min-w-[4rem]">
+            Pending ({stats.unverified})
+          </TabsTrigger>
+          <TabsTrigger value="verified" className="flex-1 min-w-[4rem]">
+            Verified ({stats.verified})
+          </TabsTrigger>
+          <TabsTrigger value="rejected" className="flex-1 min-w-[4rem]">
+            Rejected ({stats.rejected})
+          </TabsTrigger>
         </TabsList>
       </Tabs>
 
@@ -301,11 +311,10 @@ export default function AdminVerificationPage() {
                   </div>
                 </CardContent>
               </Card>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
