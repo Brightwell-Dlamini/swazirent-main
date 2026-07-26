@@ -28,7 +28,6 @@ export const isValidUserType = (type: string | null | undefined): type is UserTy
  * Normalises any stored role (including legacy values) to the preferred canonical set.
  * - renter  → seeker
  * - landlord → broker
- * Prefer calling this when writing to the DB or deciding redirects.
  */
 export const normalizeUserType = (type: string | null | undefined): UserType => {
   if (!type) return 'seeker';
@@ -44,11 +43,9 @@ export const getDefaultRedirect = (userType: UserType | null): string => {
     case 'admin':
       return '/dashboard/admin';
     case 'agent':
-      return '/dashboard/landlord'; // reuse landlord dashboard until agent route exists
     case 'broker':
       return '/dashboard/landlord';
     case 'seeker':
-      return '/dashboard/renter';
     default:
       return '/dashboard/renter';
   }
@@ -88,8 +85,13 @@ export const getUserTypeIcon = (userType: UserType | null): string => {
   }
 };
 
-/** Roles that are allowed to post listings (must also pass phone verification) */
+/** Roles allowed to post listings (phone verification still required to publish) */
 export const canPostListings = (userType: UserType | null): boolean => {
   const t = normalizeUserType(userType);
   return t === 'agent' || t === 'broker' || t === 'admin';
+};
+
+/** Seeker (includes legacy renter) */
+export const isSeekerRole = (userType: UserType | null): boolean => {
+  return normalizeUserType(userType) === 'seeker';
 };
