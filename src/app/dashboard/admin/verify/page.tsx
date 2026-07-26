@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
-import { getUserTypeLabel, isPosterRole } from '@/types/user';
+import { getUserTypeLabel, isPosterRole, POSTER_USER_TYPES } from '@/types/user';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -38,8 +38,6 @@ interface PosterProfile {
   property_count: number;
 }
 
-const POSTER_TYPES = ['landlord', 'broker', 'agent'];
-
 export default function AdminVerificationPage() {
   const { user, userType, isLoading } = useAuth();
   const router = useRouter();
@@ -64,7 +62,7 @@ export default function AdminVerificationPage() {
           `id, email, full_name, phone, user_type, is_verified, verification_level, created_at,
            properties:properties(count)`
         )
-        .in('user_type', POSTER_TYPES)
+        .in('user_type', [...POSTER_USER_TYPES])
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -148,7 +146,9 @@ export default function AdminVerificationPage() {
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4 mb-6">
         <div>
           <Button variant="ghost" size="sm" className="mb-2 -ml-2" asChild>
-            <LinkBack />
+            <Link href="/dashboard/admin">
+              <ChevronLeft className="h-4 w-4 mr-0.5" /> Back to admin
+            </Link>
           </Button>
           <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
             <Shield className="h-7 w-7 text-primary" />
@@ -158,16 +158,36 @@ export default function AdminVerificationPage() {
             Verify landlords, brokers, and agents
           </p>
         </div>
-        <Button onClick={fetchPosters} variant="outline" size="sm" disabled={loading}>
+        <Button onClick={fetchPosters} variant="outline" size="sm" disabled={loading} className="self-start">
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
         </Button>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        <StatCard label="Total posters" value={stats.total} />
-        <StatCard label="Verified" value={stats.verified} tone="green" />
-        <StatCard label="Pending" value={stats.unverified} tone="amber" />
-        <StatCard label="Rejected" value={stats.rejected} tone="red" />
+        <Card className="bg-card border-border">
+          <CardContent className="p-3 sm:p-4">
+            <p className="text-xs sm:text-sm text-muted-foreground">Total posters</p>
+            <p className="text-xl sm:text-2xl font-bold">{stats.total}</p>
+          </CardContent>
+        </Card>
+        <Card className="border-green-500/30 bg-green-500/10">
+          <CardContent className="p-3 sm:p-4">
+            <p className="text-xs sm:text-sm text-muted-foreground">Verified</p>
+            <p className="text-xl sm:text-2xl font-bold text-green-600 dark:text-green-400">{stats.verified}</p>
+          </CardContent>
+        </Card>
+        <Card className="border-amber-500/30 bg-amber-500/10">
+          <CardContent className="p-3 sm:p-4">
+            <p className="text-xs sm:text-sm text-muted-foreground">Pending</p>
+            <p className="text-xl sm:text-2xl font-bold text-amber-600 dark:text-amber-400">{stats.unverified}</p>
+          </CardContent>
+        </Card>
+        <Card className="border-red-500/30 bg-red-500/10">
+          <CardContent className="p-3 sm:p-4">
+            <p className="text-xs sm:text-sm text-muted-foreground">Rejected</p>
+            <p className="text-xl sm:text-2xl font-bold text-red-600 dark:text-red-400">{stats.rejected}</p>
+          </CardContent>
+        </Card>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="mb-6">
@@ -218,7 +238,7 @@ export default function AdminVerificationPage() {
                     <div className="min-w-0 space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="font-semibold truncate">{poster.full_name || 'Unknown'}</h3>
-                        <Badge variant="outline">{getUserTypeLabel(poster.user_type as any)}</Badge>
+                        <Badge variant="outline">{getUserTypeLabel(poster.user_type)}</Badge>
                         <Badge className={statusClass}>{statusLabel}</Badge>
                       </div>
                       <p className="text-sm text-muted-foreground truncate">{poster.email}</p>
@@ -289,60 +309,3 @@ export default function AdminVerificationPage() {
     </div>
   );
 }
-
-function LinkBack() {
-  return (
-    <Link href="/dashboard/admin" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground">
-      <ChevronLeft className="h-4 w-4 mr-0.5" /> Back to admin
-    </Link>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number;
-  tone?: 'green' | 'amber' | 'red';
-}) {
-  const toneClass =
-    tone === 'green'
-      ? 'border-green-500/30 bg-green-500/10'
-      : tone === 'amber'
-        ? 'border-amber-500/30 bg-amber-500/10'
-        : tone === 'red'
-          ? 'border-red-500/30 bg-red-500/10'
-          : 'bg-card';
-  const valueClass =
-    tone === 'green'
-      ? 'text-green-600 dark:text-green-400'
-      : tone === 'amber'
-        ? 'text-amber-600 dark:text-amber-400'
-        : tone === 'red'
-          ? 'text-red-600 dark:text-red-400'
-          : '';
-  return (
-    <Card className={toneClass}>
-      <CardContent className="p-3 sm:p-4">
-        <p className="text-xs sm:text-sm text-muted-foreground">{label}</p>
-        <p className={`text-xl sm:text-2xl font-bold ${valueClass}`}>{value}</p>
-      </CardContent>
-    </Card>
-  );
-}
-
-// fix missing imports used above
-import Link from 'next/link';
-import { getUserTypeLabel } from '@/types/user';
-
-function LinkBack() {
-  return (
-    <Link href="/dashboard/admin" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground">
-      <ChevronLeft className="h-4 w-4 mr-0.5" /> Back to admin
-    </Link>
-  );
-}
-
-// re-declare fetch alias used earlier in broken draft - keep compile clean by real names only

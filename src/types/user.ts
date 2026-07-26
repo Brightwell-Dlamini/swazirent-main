@@ -5,7 +5,7 @@
 //   broker   — facilitator hired to find tenants/buyers
 //   agent    — licensed / established estate agent
 //   admin    — platform admin
-// Legacy 'renter' is normalised to seeker on read only.
+// Legacy 'renter' normalises to seeker on read only.
 
 export type UserType =
   | 'seeker'
@@ -13,7 +13,7 @@ export type UserType =
   | 'broker'
   | 'agent'
   | 'admin'
-  | 'renter'; // legacy — normalised to seeker
+  | 'renter'; // legacy only
 
 export const isValidUserType = (type: string | null | undefined): type is UserType => {
   return (
@@ -51,8 +51,8 @@ export const getDefaultRedirect = (userType: UserType | null): string => {
 
 export const getDefaultUserType = (): UserType => 'seeker';
 
-export const getUserTypeLabel = (userType: UserType | null): string => {
-  const t = normalizeUserType(userType);
+export const getUserTypeLabel = (userType: UserType | null | string): string => {
+  const t = normalizeUserType(userType as UserType);
   switch (t) {
     case 'admin':
       return 'Administrator';
@@ -92,8 +92,8 @@ export const canPostListings = (userType: UserType | null): boolean => {
   return t === 'landlord' || t === 'agent' || t === 'broker' || t === 'admin';
 };
 
-export const isPosterRole = (userType: UserType | null): boolean => {
-  const t = normalizeUserType(userType);
+export const isPosterRole = (userType: UserType | null | string): boolean => {
+  const t = normalizeUserType(userType as UserType);
   return t === 'landlord' || t === 'agent' || t === 'broker';
 };
 
@@ -118,3 +118,5 @@ export const ASSIGNABLE_ROLES: { value: UserType; label: string }[] = [
   { value: 'agent', label: 'Agent' },
   { value: 'admin', label: 'Admin' },
 ];
+
+export const POSTER_USER_TYPES = ['landlord', 'broker', 'agent'] as const;
