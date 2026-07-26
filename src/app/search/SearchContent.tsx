@@ -1,7 +1,7 @@
 // src/app/search/SearchContent.tsx
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, memo, useRef, useDeferredValue, useTransition } from 'react';
+import { useState, useEffect, useCallback, useMemo, memo, useTransition } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { useDebounce } from 'use-debounce';
 import { PropertyCard } from '@/components/properties/PropertyCard';
@@ -10,46 +10,34 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Slider } from '@/components/ui/slider';
+import { Sheet, SheetContent, SheetTitle, SheetClose } from '@/components/ui/sheet';
 import {
-  Sheet,
-  SheetContent,
-  SheetTrigger,
-  SheetTitle,
-  SheetClose,
-} from '@/components/ui/sheet';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
-import { Search, SlidersHorizontal, X, Bookmark, Clock, Loader2, Filter } from 'lucide-react';
+import { Search, X, Bookmark, Clock, Loader2, Filter, Home, Map, Building2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/lib/supabase';
-import { Property, PropertyType } from '@/types/property';
+import { Property, AssetCategory, ASSET_CATEGORY_LABELS, inferAssetCategory } from '@/types/property';
+import { mapPropertyRow } from '@/lib/mapProperty';
+import { ESWATINI_CITIES, RESIDENTIAL_AMENITIES } from '@/utils/constants';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { motion, AnimatePresence } from 'framer-motion';
 
-// Types
 interface Filters {
   city: string;
   keyword: string;
   minPrice: number;
   maxPrice: number;
   bedrooms: string;
-  propertyType: PropertyType[];
+  assetCategory: AssetCategory | 'any';
   amenities: string[];
   fitted: boolean;
+  listingIntent: 'any' | 'sale' | 'long_rent';
 }
 
 interface SavedSearch {
@@ -61,41 +49,19 @@ interface SavedSearch {
 type SortOption = 'newest' | 'price_asc' | 'price_desc' | 'popular';
 type ViewMode = 'grid' | 'list';
 
-const ITEMS_PER_PAGE = 12; // ← Moved to constant outside component
+const ITEMS_PER_PAGE = 12;
+const MAX_PRICE = 500000; // covers sale prices too
 
-// Eswatini cities
-const ESWATINI_CITIES = [
-  'Mbabane', 'Manzini','Matsapha', 'Ezulwini', 'Lobamba', 'Nhlangano',
-  'Piggs Peak', 'Siteki', 'Big Bend',  'Kwaluseni',
-  'Hlatikulu', 'Mhlume', 'Simunye'
+const sanitizeInput = (input: string) => input.replace(/[<>]/g, '').trim().slice(0, 100);
+
+const CATEGORY_CHIPS: { value: AssetCategory | 'any'; label: string; icon: typeof Home }[] = [
+  { value: 'any', label: 'All', icon: Search },
+  { value: 'residential', label: 'Residential', icon: Home },
+  { value: 'land', label: 'Land', icon: Map },
+  { value: 'commercial', label: 'Commercial', icon: Building2 },
 ];
 
-// Eswatini-specific amenities
-const ESWATINI_AMENITIES = [
-  'Parking', 'Own Electrity Meter', 'Shared Electrity Meter', 'Security', 'Own Water Meter', 'Fully Fitted',
-   'Pet Friendly', 'Shower', 'Bathtub'
-  
-];
-
-const PROPERTY_TYPES: PropertyType[] = ['house', 'flat/apartment',  'backrooms','shared', 'other'];
-
-const FILTER_PRESETS = [
-  { name: 'Under E2000', filters: { maxPrice: 2000 } },
-  { name: '2+ Bedrooms', filters: { bedrooms: '2' } },
-  { name: 'Fitted', filters: { fitted: true } },
-  { name: 'With Parking', filters: { amenities: ['Parking'] } },
-];
-
-// Input sanitization
-const sanitizeInput = (input: string): string => {
-  return input
-    .replace(/[<>]/g, '')
-    .trim()
-    .slice(0, 100);
-};
-
-// Memoized Filter Content
-const FilterContent = memo(({
+const FilterContent = memo(function FilterContent({
   filters,
   onFilterChange,
   onClearFilters,
@@ -105,198 +71,125 @@ const FilterContent = memo(({
   onFilterChange: <K extends keyof Filters>(key: K, value: Filters[K]) => void;
   onClearFilters: () => void;
   hasActiveFilters: boolean;
-}) => {
-  // Memoize expensive operations
+}) {
   const priceRange = useMemo(() => [filters.minPrice, filters.maxPrice], [filters.minPrice, filters.maxPrice]);
-  
+  const showBeds = filters.assetCategory === 'any' || filters.assetCategory === 'residential';
+
   return (
     <div className="space-y-6 pb-6">
-      {/* Price Range */}
       <div>
-        <Label className="text-base font-semibold text-gray-900 dark:text-white">Price Range (E/month)</Label>
+        <Label className="text-base font-semibold">Price range (E)</Label>
         <div className="mt-2 px-2">
           <Slider
             value={priceRange}
             min={0}
-            max={10000}
+            max={MAX_PRICE}
             step={500}
             onValueChange={([min, max]) => {
               onFilterChange('minPrice', min);
               onFilterChange('maxPrice', max);
             }}
-            aria-label="Price range slider"
-            className="dark:[&_[role=slider]]:bg-primary-400"
           />
-          <div className="flex justify-between mt-2 text-sm text-gray-600 dark:text-gray-400">
-            <span>E{filters.minPrice}</span>
-            <span>E{filters.maxPrice}</span>
+          <div className="flex justify-between mt-2 text-sm text-muted-foreground">
+            <span>E{filters.minPrice.toLocaleString()}</span>
+            <span>E{filters.maxPrice.toLocaleString()}</span>
           </div>
         </div>
       </div>
 
-      {/* City Selection */}
       <div>
-        <Label className="text-base font-semibold text-gray-900 dark:text-white" htmlFor="city-select">
-          City/Town
-        </Label>
-        <Select
-          value={filters.city}
-          onValueChange={(value) => onFilterChange('city', value)}
-        >
-          <SelectTrigger id="city-select" className="mt-2 dark:bg-gray-900 dark:border-gray-700">
-            <SelectValue placeholder="Any city" />
-          </SelectTrigger>
-          <SelectContent className="dark:bg-gray-900 dark:border-gray-700">
+        <Label className="text-base font-semibold">For sale / rent</Label>
+        <Select value={filters.listingIntent} onValueChange={(v) => onFilterChange('listingIntent', v as Filters['listingIntent'])}>
+          <SelectTrigger className="mt-2"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="any">Any</SelectItem>
+            <SelectItem value="sale">For sale</SelectItem>
+            <SelectItem value="long_rent">Long-term rent</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div>
+        <Label className="text-base font-semibold">City / town</Label>
+        <Select value={filters.city} onValueChange={(v) => onFilterChange('city', v)}>
+          <SelectTrigger className="mt-2"><SelectValue placeholder="Any city" /></SelectTrigger>
+          <SelectContent>
             <SelectItem value="any">Any city</SelectItem>
             {ESWATINI_CITIES.map((city) => (
-              <SelectItem key={city} value={city}>
-                {city}
-              </SelectItem>
+              <SelectItem key={city} value={city}>{city}</SelectItem>
             ))}
           </SelectContent>
         </Select>
       </div>
 
-      {/* Bedrooms */}
-      <div>
-        <Label className="text-base font-semibold text-gray-900 dark:text-white" htmlFor="bedrooms-select">
-          Bedrooms
-        </Label>
-        <Select
-          value={filters.bedrooms}
-          onValueChange={(value) => onFilterChange('bedrooms', value)}
-        >
-          <SelectTrigger id="bedrooms-select" className="mt-2 dark:bg-gray-900 dark:border-gray-700">
-            <SelectValue placeholder="Any" />
-          </SelectTrigger>
-          <SelectContent className="dark:bg-gray-900 dark:border-gray-700">
-            <SelectItem value="any">Any</SelectItem>
-            <SelectItem value="1">1+</SelectItem>
-            <SelectItem value="2">2+</SelectItem>
-            <SelectItem value="3">3+</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Property Type */}
-      <div>
-        <Label className="text-base font-semibold text-gray-900 dark:text-white">Property Type</Label>
-        <div className="mt-2 space-y-2">
-          {PROPERTY_TYPES.map((type) => (
-            <div key={type} className="flex items-center space-x-2">
-              <Checkbox
-                id={`type-${type}`}
-                checked={filters.propertyType.includes(type)}
-                onCheckedChange={(checked) => {
-                  if (checked) {
-                    onFilterChange('propertyType', [...filters.propertyType, type]);
-                  } else {
-                    onFilterChange(
-                      'propertyType',
-                      filters.propertyType.filter((t) => t !== type)
-                    );
-                  }
-                }}
-                className="dark:border-gray-600 dark:data-[state=checked]:bg-primary-500"
-              />
-              <Label htmlFor={`type-${type}`} className="capitalize text-gray-700 dark:text-gray-300">
-                {type}
-              </Label>
-            </div>
-          ))}
+      {showBeds && (
+        <div>
+          <Label className="text-base font-semibold">Bedrooms</Label>
+          <Select value={filters.bedrooms} onValueChange={(v) => onFilterChange('bedrooms', v)}>
+            <SelectTrigger className="mt-2"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="any">Any</SelectItem>
+              <SelectItem value="1">1+</SelectItem>
+              <SelectItem value="2">2+</SelectItem>
+              <SelectItem value="3">3+</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
-      </div>
+      )}
 
-      {/* Amenities */}
-      <div>
-        <Label className="text-base font-semibold text-gray-900 dark:text-white">Amenities</Label>
-        <ScrollArea className="h-48 mt-2">
-          <div className="space-y-2 pr-4">
-            {ESWATINI_AMENITIES.map((amenity) => (
-              <div key={amenity} className="flex items-center space-x-2">
-                <Checkbox
-                  id={`amenity-${amenity}`}
-                  checked={filters.amenities.includes(amenity)}
-                  onCheckedChange={(checked) => {
-                    if (checked) {
-                      onFilterChange('amenities', [...filters.amenities, amenity]);
-                    } else {
-                      onFilterChange(
-                        'amenities',
-                        filters.amenities.filter((a) => a !== amenity)
-                      );
-                    }
-                  }}
-                  className="dark:border-gray-600 dark:data-[state=checked]:bg-primary-500"
-                />
-                <Label htmlFor={`amenity-${amenity}`} className="text-gray-700 dark:text-gray-300">
-                  {amenity}
-                </Label>
-              </div>
-            ))}
-          </div>
-        </ScrollArea>
-      </div>
+      {showBeds && (
+        <div className="flex items-center space-x-2">
+          <Checkbox id="furnished" checked={filters.fitted}
+            onCheckedChange={(c) => onFilterChange('fitted', c === true)} />
+          <Label htmlFor="furnished">Furnished only</Label>
+        </div>
+      )}
 
-      {/* Furnished */}
-      <div className="flex items-center space-x-2">
-        <Checkbox
-          id="furnished"
-          checked={filters.fitted}
-          onCheckedChange={(checked) => onFilterChange('fitted', checked === true)}
-          className="dark:border-gray-600 dark:data-[state=checked]:bg-primary-500"
-        />
-        <Label htmlFor="furnished" className="text-gray-700 dark:text-gray-300">
-          Furnished Only
-        </Label>
-      </div>
+      {showBeds && (
+        <div>
+          <Label className="text-base font-semibold">Amenities</Label>
+          <ScrollArea className="h-40 mt-2">
+            <div className="space-y-2 pr-4">
+              {RESIDENTIAL_AMENITIES.map((amenity) => (
+                <div key={amenity} className="flex items-center space-x-2">
+                  <Checkbox
+                    id={`a-${amenity}`}
+                    checked={filters.amenities.includes(amenity)}
+                    onCheckedChange={(checked) => {
+                      if (checked) onFilterChange('amenities', [...filters.amenities, amenity]);
+                      else onFilterChange('amenities', filters.amenities.filter((a) => a !== amenity));
+                    }}
+                  />
+                  <Label htmlFor={`a-${amenity}`} className="text-sm">{amenity}</Label>
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+        </div>
+      )}
 
-      {/* Clear Filters Button */}
       {hasActiveFilters && (
-        <Button 
-          variant="outline" 
-          onClick={onClearFilters} 
-          className="w-full dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-        >
-          <X className="h-4 w-4 mr-2" />
-          Clear All Filters
+        <Button variant="outline" onClick={onClearFilters} className="w-full">
+          <X className="h-4 w-4 mr-2" /> Clear all filters
         </Button>
       )}
     </div>
   );
 });
 
-FilterContent.displayName = 'FilterContent';
-
-// Memoized Property Grid Item
-const PropertyGridItem = memo(({ property, viewMode }: { property: Property; viewMode: ViewMode }) => (
-  <motion.div
-    initial={{ opacity: 0, y: 20 }}
-    animate={{ opacity: 1, y: 0 }}
-    exit={{ opacity: 0, y: -20 }}
-    transition={{ duration: 0.2 }}
-  >
-    <PropertyCard property={property} viewMode={viewMode} />
-  </motion.div>
-));
-
-PropertyGridItem.displayName = 'PropertyGridItem';
-
-// Skeleton Loader
-const SkeletonGrid = memo(({ count = 6 }: { count?: number }) => (
-  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-    {Array.from({ length: count }).map((_, i) => (
-      <div key={i} className="space-y-3">
-        <Skeleton className="h-48 w-full rounded-lg dark:bg-gray-800" />
-        <Skeleton className="h-4 w-3/4 dark:bg-gray-800" />
-        <Skeleton className="h-4 w-1/2 dark:bg-gray-800" />
-        <Skeleton className="h-6 w-1/3 dark:bg-gray-800" />
-      </div>
-    ))}
-  </div>
-));
-
-SkeletonGrid.displayName = 'SkeletonGrid';
+const SkeletonGrid = memo(function SkeletonGrid({ count = 6 }: { count?: number }) {
+  return (
+    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="space-y-3">
+          <Skeleton className="h-48 w-full rounded-lg" />
+          <Skeleton className="h-4 w-3/4" />
+          <Skeleton className="h-4 w-1/2" />
+        </div>
+      ))}
+    </div>
+  );
+});
 
 export default function SearchContent() {
   const router = useRouter();
@@ -305,293 +198,165 @@ export default function SearchContent() {
 
   const [allProperties, setAllProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
-  const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState<SortOption>('newest');
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [paginationMode, setPaginationMode] = useState<'pagination' | 'load-more'>('pagination');
   const [isPending, startTransition] = useTransition();
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
+  const [isSaveSearchDialogOpen, setIsSaveSearchDialogOpen] = useState(false);
+  const [searchName, setSearchName] = useState('');
 
   const [filters, setFilters] = useState<Filters>(() => ({
     city: searchParams.get('city') || 'any',
     keyword: searchParams.get('q') || '',
     minPrice: Number(searchParams.get('minPrice')) || 0,
-    maxPrice: Number(searchParams.get('maxPrice')) || 10000,
+    maxPrice: Number(searchParams.get('maxPrice')) || MAX_PRICE,
     bedrooms: searchParams.get('bedrooms') || 'any',
-    propertyType: (searchParams.getAll('propertyType') as PropertyType[]) || [],
+    assetCategory: (searchParams.get('category') as AssetCategory) || 'any',
     amenities: searchParams.getAll('amenities') || [],
-    fitted: searchParams.get('fitted') === 'true',
+    fitted: searchParams.get('furnished') === 'true',
+    listingIntent: (searchParams.get('intent') as Filters['listingIntent']) || 'any',
   }));
 
   const [searchInput, setSearchInput] = useState(filters.keyword);
-  const [debouncedSearchTerm] = useDebounce(searchInput, 300);
-  const deferredFilters = useDeferredValue(filters);
+  const [debouncedSearch] = useDebounce(searchInput, 300);
 
-  // Recent searches
-  const [recentSearches, setRecentSearches] = useState<string[]>([]);
-  const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
-  const [isSaveSearchDialogOpen, setIsSaveSearchDialogOpen] = useState(false);
-  const [searchName, setSearchName] = useState('');
-  const [isFilterOpen, setIsFilterOpen] = useState(false);
-
-  // Load recent and saved searches once
   useEffect(() => {
-    const recent = localStorage.getItem('recentSearches');
-    if (recent) setRecentSearches(JSON.parse(recent));
-    const saved = localStorage.getItem('savedSearches');
-    if (saved) setSavedSearches(JSON.parse(saved));
+    if (debouncedSearch !== filters.keyword) {
+      setFilters((p) => ({ ...p, keyword: sanitizeInput(debouncedSearch) }));
+      setPage(1);
+    }
+  }, [debouncedSearch]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    try {
+      const recent = localStorage.getItem('recentSearches');
+      if (recent) setRecentSearches(JSON.parse(recent));
+      const saved = localStorage.getItem('savedSearches');
+      if (saved) setSavedSearches(JSON.parse(saved));
+    } catch { /* ignore */ }
   }, []);
 
-  // Fetch all properties once on mount
   useEffect(() => {
-    let isMounted = true;
-
-    const fetchAllProperties = async () => {
-      if (!isMounted) return;
+    let mounted = true;
+    (async () => {
       setLoading(true);
-      
       try {
         const { data, error } = await supabase
           .from('properties')
-          .select(`
-            *,
-            landlord:profiles!properties_landlord_id_fkey (
-              full_name,
-              phone,
-              is_verified
-            ),
-            photos:property_photos (
-              id,
-              photo_url,
-              caption,
-              display_order
-            )
-          `)
+          .select(`*, landlord:profiles!properties_landlord_id_fkey (full_name, phone, is_verified), photos:property_photos (id, photo_url, caption, display_order, created_at)`)
           .eq('status', 'active')
           .order('created_at', { ascending: false });
-
         if (error) throw error;
-        if (!isMounted) return;
-
-        const transformedData: Property[] = (data || []).map((item: any) => ({
-          id: item.id,
-          landlord_id: item.landlord_id,
-          title: item.title || '',
-          description: item.description || '',
-          price: item.price || 0,
-          property_type: item.property_type || 'other',
-          location_city: item.location_city || '',
-          location_suburb: item.location_suburb || '',
-          location_address: item.location_address || '',
-          latitude: item.latitude,
-          longitude: item.longitude,
-          bedrooms: item.bedrooms || 0,
-          bathrooms: item.bathrooms || 0,
-          is_furnished: item.is_furnished || false,
-          amenities: item.amenities || [],
-          lease_terms: item.lease_terms || '',
-          status: item.status || 'active',
-          is_featured: item.is_featured || false,
-          views: item.views || 0,
-          created_at: item.created_at,
-          updated_at: item.updated_at,
-          contact_phone: item.contact_phone || '',
-          contact_whatsapp: item.contact_whatsapp || '',
-          country: item.country || 'Eswatini',
-          landlord: item.landlord || {
-            full_name: 'Property Owner',
-            phone: '',
-            is_verified: false,
-          },
-          photos: item.photos || [],
-        }));
-
-        if (isMounted) {
-          setAllProperties(transformedData);
-          setTotalCount(transformedData.length);
-        }
-      } catch (error) {
-        console.error('Error fetching properties:', error);
-        if (isMounted) {
-          toast.error('Failed to load properties');
-        }
+        if (!mounted) return;
+        setAllProperties((data || []).map(mapPropertyRow));
+      } catch (e) {
+        console.error(e);
+        toast.error('Failed to load listings');
       } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
+        if (mounted) setLoading(false);
       }
-    };
+    })();
+    return () => { mounted = false; };
+  }, []);
 
-    fetchAllProperties();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []); // Empty dependency array - only runs once
-
-  // Update URL when filters change (using startTransition to prevent blocking)
   useEffect(() => {
     if (loading) return;
-
     startTransition(() => {
       const params = new URLSearchParams();
-      if (filters.city && filters.city !== 'any') params.set('city', filters.city);
+      if (filters.city !== 'any') params.set('city', filters.city);
       if (filters.keyword) params.set('q', filters.keyword);
-      if (filters.minPrice > 0) params.set('minPrice', filters.minPrice.toString());
-      if (filters.maxPrice < 10000) params.set('maxPrice', filters.maxPrice.toString());
+      if (filters.minPrice > 0) params.set('minPrice', String(filters.minPrice));
+      if (filters.maxPrice < MAX_PRICE) params.set('maxPrice', String(filters.maxPrice));
       if (filters.bedrooms !== 'any') params.set('bedrooms', filters.bedrooms);
+      if (filters.assetCategory !== 'any') params.set('category', filters.assetCategory);
+      if (filters.listingIntent !== 'any') params.set('intent', filters.listingIntent);
       if (filters.fitted) params.set('furnished', 'true');
+      filters.amenities.forEach((a) => params.append('amenities', a));
       if (sortBy !== 'newest') params.set('sort', sortBy);
-      if (page > 1) params.set('page', page.toString());
-      filters.propertyType.forEach(type => params.append('propertyType', type));
-      filters.amenities.forEach(amenity => params.append('amenities', amenity));
-
-      const newUrl = `${pathname}?${params.toString()}`;
-      router.replace(newUrl, { scroll: false });
+      if (page > 1) params.set('page', String(page));
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
     });
   }, [filters, sortBy, page, pathname, router, loading]);
 
-  // Save search when user performs a search
-  useEffect(() => {
-    if (filters.keyword && filters.keyword.length > 2) {
-      const sanitized = sanitizeInput(filters.keyword);
-      setRecentSearches(prev => {
-        const updated = [sanitized, ...prev.filter(s => s !== sanitized)].slice(0, 5);
-        localStorage.setItem('recentSearches', JSON.stringify(updated));
-        return updated;
+  const filteredAndSorted = useMemo(() => {
+    let list = [...allProperties];
+
+    if (filters.assetCategory !== 'any') {
+      list = list.filter((p) => inferAssetCategory(p) === filters.assetCategory);
+    }
+    if (filters.listingIntent !== 'any') {
+      list = list.filter((p) => {
+        const intent = p.listing_intent
+          || (p.listing_type === 'buy' || p.price_period === 'once' ? 'sale' : 'long_rent');
+        return intent === filters.listingIntent;
       });
     }
-  }, [filters.keyword]);
-
-  // MEMOIZED: Filter and sort properties (only recomputes when dependencies change)
-  const filteredAndSortedProperties = useMemo(() => {
-    if (loading || allProperties.length === 0) return [];
-
-    let filtered = [...allProperties];
-
-    // Apply filters
-    if (deferredFilters.city && deferredFilters.city !== 'any') {
-      filtered = filtered.filter(p => 
-        p.location_city?.toLowerCase() === deferredFilters.city.toLowerCase()
+    if (filters.city !== 'any') {
+      list = list.filter((p) => p.location_city?.toLowerCase() === filters.city.toLowerCase());
+    }
+    if (filters.keyword) {
+      const k = filters.keyword.toLowerCase();
+      list = list.filter(
+        (p) =>
+          p.title?.toLowerCase().includes(k) ||
+          p.description?.toLowerCase().includes(k) ||
+          p.location_city?.toLowerCase().includes(k) ||
+          p.location_suburb?.toLowerCase().includes(k)
       );
     }
-
-    if (deferredFilters.keyword) {
-      const keyword = deferredFilters.keyword.toLowerCase();
-      filtered = filtered.filter(p =>
-        p.title?.toLowerCase().includes(keyword) ||
-        p.description?.toLowerCase().includes(keyword) ||
-        p.location_city?.toLowerCase().includes(keyword) ||
-        p.location_suburb?.toLowerCase().includes(keyword)
-      );
+    if (filters.minPrice > 0) list = list.filter((p) => p.price >= filters.minPrice);
+    if (filters.maxPrice < MAX_PRICE) list = list.filter((p) => p.price <= filters.maxPrice);
+    if (filters.bedrooms !== 'any' && (filters.assetCategory === 'any' || filters.assetCategory === 'residential')) {
+      const minB = parseInt(filters.bedrooms, 10);
+      list = list.filter((p) => (p.bedrooms || 0) >= minB);
     }
-
-    if (deferredFilters.minPrice > 0) {
-      filtered = filtered.filter(p => p.price >= deferredFilters.minPrice);
+    if (filters.amenities.length) {
+      list = list.filter((p) => filters.amenities.every((a) => p.amenities?.includes(a)));
     }
+    if (filters.fitted) list = list.filter((p) => p.is_furnished);
 
-    if (deferredFilters.maxPrice < 10000) {
-      filtered = filtered.filter(p => p.price <= deferredFilters.maxPrice);
-    }
-
-    if (deferredFilters.bedrooms !== 'any') {
-      const minBedrooms = parseInt(deferredFilters.bedrooms);
-      filtered = filtered.filter(p => (p.bedrooms || 0) >= minBedrooms);
-    }
-
-    if (deferredFilters.propertyType.length > 0) {
-      filtered = filtered.filter(p => 
-        deferredFilters.propertyType.includes(p.property_type as PropertyType)
-      );
-    }
-
-    if (deferredFilters.amenities.length > 0) {
-      filtered = filtered.filter(p =>
-        deferredFilters.amenities.every(a => p.amenities?.includes(a))
-      );
-    }
-
-    if (deferredFilters.fitted) {
-      filtered = filtered.filter(p => p.is_furnished === true);
-    }
-
-    // Apply sorting
     switch (sortBy) {
       case 'price_asc':
-        filtered.sort((a, b) => a.price - b.price);
+        list.sort((a, b) => a.price - b.price);
         break;
       case 'price_desc':
-        filtered.sort((a, b) => b.price - a.price);
+        list.sort((a, b) => b.price - a.price);
         break;
       case 'popular':
-        filtered.sort((a, b) => (b.views || 0) - (a.views || 0));
+        list.sort((a, b) => (b.views || 0) - (a.views || 0));
         break;
-      case 'newest':
       default:
-        filtered.sort((a, b) => 
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        );
+        list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     }
+    return list;
+  }, [allProperties, filters, sortBy]);
 
-    return filtered;
-  }, [allProperties, deferredFilters, sortBy, loading]);
+  const paginated = useMemo(() => {
+    const end = page * ITEMS_PER_PAGE;
+    return filteredAndSorted.slice(0, end);
+  }, [filteredAndSorted, page]);
 
-  // MEMOIZED: Paginated properties
-  const paginatedProperties = useMemo(() => {
-    const start = (page - 1) * ITEMS_PER_PAGE; // ← Use constant
-    const end = start + ITEMS_PER_PAGE; // ← Use constant
-    return filteredAndSortedProperties.slice(0, end);
-  }, [filteredAndSortedProperties, page]);
+  const totalPages = Math.ceil(filteredAndSorted.length / ITEMS_PER_PAGE) || 1;
+  const hasMore = paginated.length < filteredAndSorted.length;
 
-  // MEMOIZED: Derived values
-  const totalPages = useMemo(() => 
-    Math.ceil(filteredAndSortedProperties.length / ITEMS_PER_PAGE), // ← Use constant
-    [filteredAndSortedProperties.length]
-  );
+  const hasActiveFilters =
+    filters.city !== 'any' ||
+    !!filters.keyword ||
+    filters.minPrice > 0 ||
+    filters.maxPrice < MAX_PRICE ||
+    filters.bedrooms !== 'any' ||
+    filters.assetCategory !== 'any' ||
+    filters.listingIntent !== 'any' ||
+    filters.amenities.length > 0 ||
+    filters.fitted;
 
-  const hasMore = useMemo(() => 
-    paginatedProperties.length < filteredAndSortedProperties.length,
-    [paginatedProperties.length, filteredAndSortedProperties.length]
-  );
-
-  const hasActiveFilters = useMemo(() => {
-    return (
-      filters.city !== 'any' ||
-      filters.keyword !== '' ||
-      filters.minPrice > 0 ||
-      filters.maxPrice < 10000 ||
-      filters.bedrooms !== 'any' ||
-      filters.propertyType.length > 0 ||
-      filters.amenities.length > 0 ||
-      filters.fitted
-    );
-  }, [filters]);
-
-  const activeFilterCount = useMemo(() => {
-    let count = 0;
-    if (filters.city && filters.city !== 'any') count++;
-    if (filters.keyword) count++;
-    if (filters.minPrice > 0 || filters.maxPrice < 10000) count++;
-    if (filters.bedrooms !== 'any') count++;
-    count += filters.propertyType.length;
-    count += filters.amenities.length;
-    if (filters.fitted) count++;
-    return count;
-  }, [filters]);
-
-  const isCurrentSearchSaved = useMemo(() => {
-    return savedSearches.some(saved => 
-      JSON.stringify(saved.filters) === JSON.stringify(filters)
-    );
-  }, [savedSearches, filters]);
-
-  // CALLBACKS: Memoized to prevent recreation
-  const handleFilterChange = useCallback(<K extends keyof Filters>(
-    key: K,
-    value: Filters[K]
-  ) => {
-    setFilters(prev => ({ ...prev, [key]: value }));
+  const handleFilterChange = useCallback(<K extends keyof Filters>(key: K, value: Filters[K]) => {
+    setFilters((prev) => ({ ...prev, [key]: value }));
     setPage(1);
   }, []);
 
@@ -600,503 +365,180 @@ export default function SearchContent() {
       city: 'any',
       keyword: '',
       minPrice: 0,
-      maxPrice: 10000,
+      maxPrice: MAX_PRICE,
       bedrooms: 'any',
-      propertyType: [],
+      assetCategory: 'any',
       amenities: [],
       fitted: false,
+      listingIntent: 'any',
     });
     setSearchInput('');
     setPage(1);
     setIsFilterOpen(false);
   }, []);
 
-  const loadMore = useCallback(() => {
-    setPage(prev => prev + 1);
-  }, []);
-
-  const saveCurrentSearch = useCallback(() => {
-    if (!searchName.trim()) return;
-
-    const newSavedSearch: SavedSearch = {
-      name: searchName.trim(),
-      filters: { ...filters },
-      createdAt: Date.now(),
-    };
-
-    setSavedSearches(prev => {
-      const updated = [newSavedSearch, ...prev].slice(0, 10);
-      localStorage.setItem('savedSearches', JSON.stringify(updated));
-      return updated;
-    });
-    
-    setIsSaveSearchDialogOpen(false);
-    setSearchName('');
-    toast.success('Search saved!');
-  }, [searchName, filters]);
-
-  const loadSavedSearch = useCallback((saved: SavedSearch) => {
-    setFilters(saved.filters);
-    setSearchInput(saved.filters.keyword);
-    setPage(1);
-    setIsFilterOpen(false);
-  }, []);
-
-  const deleteSavedSearch = useCallback((index: number) => {
-    setSavedSearches(prev => {
-      const updated = prev.filter((_, i) => i !== index);
-      localStorage.setItem('savedSearches', JSON.stringify(updated));
-      return updated;
-    });
-  }, []);
-
-  const applyPreset = useCallback((preset: typeof FILTER_PRESETS[number]) => {
-    setFilters(prev => ({
-      ...prev,
-      ...preset.filters,
-      amenities: preset.filters.amenities ? [...preset.filters.amenities] : prev.amenities,
-    }));
-    setPage(1);
-    setIsFilterOpen(false);
-  }, []);
-
-  const handleSearchSubmit = useCallback((e: React.FormEvent) => {
-    e.preventDefault();
-    const sanitized = sanitizeInput(searchInput);
-    setSearchInput(sanitized);
-    handleFilterChange('keyword', sanitized);
-    setIsSearchFocused(false);
-  }, [searchInput, handleFilterChange]);
-
-  const showLoadMore = paginationMode === 'load-more' && hasMore;
-  const showPagination = totalPages > 1 && paginationMode === 'pagination';
-
   return (
     <div className="container mx-auto px-4 py-6 md:py-8">
-      {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-4">
-          Find Your Perfect Home in Eswatini
-        </h1>
+      <h1 className="text-2xl md:text-3xl font-bold mb-4">Find property in Eswatini</h1>
 
-        {/* Filter Presets */}
-        <div className="mb-4 flex flex-wrap gap-2">
-          {FILTER_PRESETS.map((preset) => (
-            <Button
-              key={preset.name}
-              variant="outline"
-              size="sm"
-              onClick={() => applyPreset(preset)}
-              className="hover:bg-primary-600 hover:text-white dark:hover:bg-primary-500 transition-colors dark:border-gray-700 dark:text-gray-300"
-            >
-              {preset.name}
-            </Button>
-          ))}
-        </div>
-
-        {/* Search Bar and Actions */}
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="flex-1 relative">
-            <form onSubmit={handleSearchSubmit} className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 h-5 w-5" />
-              <Input
-                type="text"
-                placeholder="Search by keyword, city, or property name..."
-                className="pl-10 h-12 dark:bg-gray-900 dark:border-gray-700 dark:text-white dark:placeholder:text-gray-500"
-                value={searchInput}
-                onChange={(e) => {
-                  const sanitized = sanitizeInput(e.target.value);
-                  setSearchInput(sanitized);
-                }}
-                onFocus={() => setIsSearchFocused(true)}
-                onBlur={() => {
-                  setTimeout(() => setIsSearchFocused(false), 200);
-                }}
-                aria-label="Search properties"
-              />
-            </form>
-
-            {/* Recent Searches Dropdown */}
-            <AnimatePresence>
-              {isSearchFocused && recentSearches.length > 0 && !filters.keyword && searchInput.length === 0 && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="absolute z-10 mt-1 w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg"
-                >
-                  <div className="p-2">
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Recent searches:</p>
-                    {recentSearches.map((search) => (
-                      <button
-                        key={search}
-                        className="flex items-center w-full px-2 py-1 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
-                        onClick={() => {
-                          setSearchInput(search);
-                          handleFilterChange('keyword', search);
-                          setIsSearchFocused(false);
-                        }}
-                      >
-                        <Clock className="h-3 w-3 mr-2 text-gray-400 dark:text-gray-500" />
-                        {search}
-                      </button>
-                    ))}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
-          <div className="flex gap-2">
-            {/* Save Search Button */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setIsSaveSearchDialogOpen(true)}
-              disabled={!hasActiveFilters}
-              className="hidden sm:flex dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-            >
-              <Bookmark className="h-4 w-4 mr-2" />
-              Save Search
-              {isCurrentSearchSaved && (
-                <Badge variant="default" className="ml-2 bg-blue-500 dark:bg-blue-600 text-white text-[10px]">
-                  Saved
-                </Badge>
-              )}
-            </Button>
-
-            {/* Mobile Filter Button */}
-            <Button
-              variant="outline"
-              className="lg:hidden relative dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-              onClick={() => setIsFilterOpen(true)}
-            >
-              <Filter className="h-4 w-4 mr-2" />
-              Filters
-              {activeFilterCount > 0 && (
-                <Badge variant="secondary" className="ml-2 h-5 w-5 p-0 flex items-center justify-center dark:bg-gray-700">
-                  {activeFilterCount}
-                </Badge>
-              )}
-            </Button>
-          </div>
-        </div>
-
-        {/* Saved Searches */}
-        {savedSearches.length > 0 && (
-          <div className="mt-4">
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">Saved searches:</p>
-            <div className="flex flex-wrap gap-2">
-              {savedSearches.map((saved, index) => (
-                <Badge
-                  key={index}
-                  variant="outline"
-                  className="cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 group dark:border-gray-700 dark:text-gray-300"
-                >
-                  <button
-                    onClick={() => loadSavedSearch(saved)}
-                    className="flex items-center"
-                  >
-                    <Bookmark className="h-3 w-3 mr-1" />
-                    {saved.name}
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      deleteSavedSearch(index);
-                    }}
-                    className="ml-2 opacity-0 group-hover:opacity-100 hover:text-red-500 dark:hover:text-red-400"
-                  >
-                    ×
-                  </button>
-                </Badge>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Active Filters */}
-        <AnimatePresence>
-          {hasActiveFilters && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="mt-4 flex flex-wrap gap-2"
-            >
-              {filters.city && filters.city !== 'any' && (
-                <Badge variant="secondary" className="px-3 py-1 dark:bg-gray-800 dark:text-gray-300">
-                  City: {filters.city}
-                  <button
-                    className="ml-2 hover:text-gray-900 dark:hover:text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 rounded-full"
-                    onClick={() => handleFilterChange('city', 'any')}
-                  >
-                    ×
-                  </button>
-                </Badge>
-              )}
-              {filters.keyword && (
-                <Badge variant="secondary" className="px-3 py-1 dark:bg-gray-800 dark:text-gray-300">
-                  Search: {filters.keyword}
-                  <button
-                    className="ml-2 hover:text-gray-900 dark:hover:text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 rounded-full"
-                    onClick={() => {
-                      handleFilterChange('keyword', '');
-                      setSearchInput('');
-                    }}
-                  >
-                    ×
-                  </button>
-                </Badge>
-              )}
-              {(filters.minPrice > 0 || filters.maxPrice < 10000) && (
-                <Badge variant="secondary" className="px-3 py-1 dark:bg-gray-800 dark:text-gray-300">
-                  E{filters.minPrice} - E{filters.maxPrice}
-                  <button
-                    className="ml-2 hover:text-gray-900 dark:hover:text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 rounded-full"
-                    onClick={() => {
-                      handleFilterChange('minPrice', 0);
-                      handleFilterChange('maxPrice', 10000);
-                    }}
-                  >
-                    ×
-                  </button>
-                </Badge>
-              )}
-              {filters.bedrooms !== 'any' && (
-                <Badge variant="secondary" className="px-3 py-1 dark:bg-gray-800 dark:text-gray-300">
-                  {filters.bedrooms}+ beds
-                  <button
-                    className="ml-2 hover:text-gray-900 dark:hover:text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 rounded-full"
-                    onClick={() => handleFilterChange('bedrooms', 'any')}
-                  >
-                    ×
-                  </button>
-                </Badge>
-              )}
-              {filters.propertyType.map((type) => (
-                <Badge key={type} variant="secondary" className="px-3 py-1 capitalize dark:bg-gray-800 dark:text-gray-300">
-                  {type}
-                  <button
-                    className="ml-2 hover:text-gray-900 dark:hover:text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 rounded-full"
-                    onClick={() =>
-                      handleFilterChange(
-                        'propertyType',
-                        filters.propertyType.filter((t) => t !== type)
-                      )
-                    }
-                  >
-                    ×
-                  </button>
-                </Badge>
-              ))}
-              {filters.amenities.map((amenity) => (
-                <Badge key={amenity} variant="secondary" className="px-3 py-1 dark:bg-gray-800 dark:text-gray-300">
-                  {amenity}
-                  <button
-                    className="ml-2 hover:text-gray-900 dark:hover:text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 rounded-full"
-                    onClick={() =>
-                      handleFilterChange(
-                        'amenities',
-                        filters.amenities.filter((a) => a !== amenity)
-                      )
-                    }
-                  >
-                    ×
-                  </button>
-                </Badge>
-              ))}
-              {filters.fitted && (
-                <Badge variant="secondary" className="px-3 py-1 dark:bg-gray-800 dark:text-gray-300">
-                  Fully Fitted
-                  <button
-                    className="ml-2 hover:text-gray-900 dark:hover:text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 rounded-full"
-                    onClick={() => handleFilterChange('fitted', false)}
-                  >
-                    ×
-                  </button>
-                </Badge>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
+      {/* Category chips */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        {CATEGORY_CHIPS.map(({ value, label, icon: Icon }) => (
+          <Button
+            key={value}
+            type="button"
+            size="sm"
+            variant={filters.assetCategory === value ? 'default' : 'outline'}
+            onClick={() => handleFilterChange('assetCategory', value)}
+            className="gap-1.5"
+          >
+            <Icon className="h-3.5 w-3.5" />
+            {label}
+          </Button>
+        ))}
       </div>
 
+      <div className="flex flex-col sm:flex-row gap-3 mb-4">
+        <div className="flex-1 relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+          <Input
+            className="pl-10 h-12"
+            placeholder="Search by keyword, city, suburb…"
+            value={searchInput}
+            onChange={(e) => setSearchInput(sanitizeInput(e.target.value))}
+            onFocus={() => setIsSearchFocused(true)}
+            onBlur={() => setTimeout(() => setIsSearchFocused(false), 200)}
+          />
+          {isSearchFocused && recentSearches.length > 0 && !searchInput && (
+            <div className="absolute z-10 mt-1 w-full bg-background border rounded-md shadow-lg p-2">
+              <p className="text-xs text-muted-foreground mb-1">Recent</p>
+              {recentSearches.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  className="flex items-center w-full px-2 py-1 text-sm hover:bg-muted rounded"
+                  onClick={() => {
+                    setSearchInput(s);
+                    handleFilterChange('keyword', s);
+                  }}
+                >
+                  <Clock className="h-3 w-3 mr-2" />{s}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <Button variant="outline" className="lg:hidden" onClick={() => setIsFilterOpen(true)}>
+          <Filter className="h-4 w-4 mr-2" />Filters
+        </Button>
+        <Button variant="outline" className="hidden sm:flex" disabled={!hasActiveFilters}
+          onClick={() => setIsSaveSearchDialogOpen(true)}>
+          <Bookmark className="h-4 w-4 mr-2" />Save
+        </Button>
+      </div>
+
+      {hasActiveFilters && (
+        <div className="flex flex-wrap gap-2 mb-4">
+          {filters.assetCategory !== 'any' && (
+            <Badge variant="secondary" className="gap-1">
+              {ASSET_CATEGORY_LABELS[filters.assetCategory]}
+              <button type="button" onClick={() => handleFilterChange('assetCategory', 'any')}>×</button>
+            </Badge>
+          )}
+          {filters.listingIntent !== 'any' && (
+            <Badge variant="secondary" className="gap-1">
+              {filters.listingIntent === 'sale' ? 'For sale' : 'Rent'}
+              <button type="button" onClick={() => handleFilterChange('listingIntent', 'any')}>×</button>
+            </Badge>
+          )}
+          {filters.city !== 'any' && (
+            <Badge variant="secondary" className="gap-1">
+              {filters.city}
+              <button type="button" onClick={() => handleFilterChange('city', 'any')}>×</button>
+            </Badge>
+          )}
+          {filters.keyword && (
+            <Badge variant="secondary" className="gap-1">
+              “{filters.keyword}”
+              <button type="button" onClick={() => { handleFilterChange('keyword', ''); setSearchInput(''); }}>×</button>
+            </Badge>
+          )}
+          <Button variant="ghost" size="sm" onClick={clearFilters}>Clear all</Button>
+        </div>
+      )}
+
       <div className="flex gap-8">
-        {/* Desktop Filters Sidebar */}
         <div className="hidden lg:block w-72 shrink-0">
           <div className="sticky top-24">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Filters</h2>
+              <h2 className="text-lg font-semibold">Filters</h2>
               {hasActiveFilters && (
-                <Button variant="ghost" size="sm" onClick={clearFilters} className="dark:text-gray-400 dark:hover:text-white">
-                  Clear all
-                </Button>
+                <Button variant="ghost" size="sm" onClick={clearFilters}>Clear</Button>
               )}
             </div>
-            <FilterContent              filters={filters}
-              onFilterChange={handleFilterChange}
-              onClearFilters={clearFilters}
-              hasActiveFilters={hasActiveFilters}
-            />
+            <FilterContent filters={filters} onFilterChange={handleFilterChange}
+              onClearFilters={clearFilters} hasActiveFilters={hasActiveFilters} />
           </div>
         </div>
 
-        {/* Results */}
         <div className="flex-1">
-          {/* Results Count & Controls */}
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
-            <p className="text-gray-600 dark:text-gray-400" aria-live="polite">
-              {loading ? (
-                'Loading...'
-              ) : (
-                <span className="font-semibold text-gray-900 dark:text-white">
-                  {filteredAndSortedProperties.length}
-                </span>
-              )}{' '}
-              property{filteredAndSortedProperties.length !== 1 ? 's' : ''} found
+          <div className="flex flex-col sm:flex-row justify-between gap-4 mb-4">
+            <p className="text-muted-foreground">
+              {loading ? 'Loading…' : (
+                <><span className="font-semibold text-foreground">{filteredAndSorted.length}</span> listing{filteredAndSorted.length !== 1 ? 's' : ''}</>
+              )}
             </p>
-            <div className="flex items-center gap-4 flex-wrap">
-              {/* View Mode Toggle */}
-              <div className="flex border rounded-lg overflow-hidden dark:border-gray-700">
-                <button
-                  onClick={() => setViewMode('grid')}
-                  className={`px-3 py-1 text-sm transition-colors ${
-                    viewMode === 'grid'
-                      ? 'bg-primary-600 text-white dark:bg-primary-500'
-                      : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300'
-                  }`}
-                >
-                  Grid
-                </button>
-                <button
-                  onClick={() => setViewMode('list')}
-                  className={`px-3 py-1 text-sm transition-colors ${
-                    viewMode === 'list'
-                      ? 'bg-primary-600 text-white dark:bg-primary-500'
-                      : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300'
-                  }`}
-                >
-                  List
-                </button>
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex border rounded-lg overflow-hidden">
+                <button type="button" onClick={() => setViewMode('grid')}
+                  className={`px-3 py-1 text-sm ${viewMode === 'grid' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>Grid</button>
+                <button type="button" onClick={() => setViewMode('list')}
+                  className={`px-3 py-1 text-sm ${viewMode === 'list' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>List</button>
               </div>
-
-              {/* Pagination Mode Selector */}
-              <Select
-                value={paginationMode}
-                onValueChange={(value: 'pagination' | 'load-more') => {
-                  setPaginationMode(value);
-                  setPage(1);
-                }}
-              >
-                <SelectTrigger className="w-32 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300">
-                  <SelectValue placeholder="View mode" />
-                </SelectTrigger>
-                <SelectContent className="dark:bg-gray-900 dark:border-gray-700">
-                  <SelectItem value="pagination">Pages</SelectItem>
-                  <SelectItem value="load-more">Load More</SelectItem>
-                </SelectContent>
-              </Select>
-
-              {/* Sort Selector */}
-              <Select
-                value={sortBy}
-                onValueChange={(value: SortOption) => {
-                  setSortBy(value);
-                  setPage(1);
-                }}
-              >
-                <SelectTrigger className="w-45 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300">
-                  <SelectValue placeholder="Sort by" />
-                </SelectTrigger>
-                <SelectContent className="dark:bg-gray-900 dark:border-gray-700">
-                  <SelectItem value="newest">Newest First</SelectItem>
-                  <SelectItem value="price_asc">Price: Low to High</SelectItem>
-                  <SelectItem value="price_desc">Price: High to Low</SelectItem>
-                  <SelectItem value="popular">Most Popular</SelectItem>
+              <Select value={sortBy} onValueChange={(v: SortOption) => { setSortBy(v); setPage(1); }}>
+                <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="newest">Newest</SelectItem>
+                  <SelectItem value="price_asc">Price ↑</SelectItem>
+                  <SelectItem value="price_desc">Price ↓</SelectItem>
+                  <SelectItem value="popular">Popular</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
 
-          {/* Property Grid */}
           {loading ? (
-            <SkeletonGrid count={6} />
-          ) : filteredAndSortedProperties.length === 0 ? (
-            <div className="text-center py-12">
-              <div className="w-16 h-16 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center mx-auto mb-4">
-                <Search className="h-8 w-8 text-gray-400 dark:text-gray-500" />
-              </div>
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">No properties found</h3>
-              <p className="text-gray-600 dark:text-gray-400">
-                Try adjusting your filters or search criteria
-              </p>
-              {hasActiveFilters && (
-                <Button variant="outline" onClick={clearFilters} className="mt-4 dark:border-gray-700 dark:text-gray-300">
-                  Clear All Filters
-                </Button>
-              )}
+            <SkeletonGrid />
+          ) : filteredAndSorted.length === 0 ? (
+            <div className="text-center py-16">
+              <Search className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
+              <h3 className="font-semibold text-lg mb-1">No listings found</h3>
+              <p className="text-muted-foreground mb-4">Try another category or clear filters</p>
+              {hasActiveFilters && <Button variant="outline" onClick={clearFilters}>Clear filters</Button>}
             </div>
           ) : (
             <>
-              <div className={`grid ${viewMode === 'grid' ? 'md:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'} gap-6`}>
+              <div className={`grid gap-6 ${viewMode === 'grid' ? 'md:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'}`}>
                 <AnimatePresence mode="popLayout">
-                  {paginatedProperties.map((property) => (
-                    <PropertyGridItem key={property.id} property={property} viewMode={viewMode} />
+                  {paginated.map((p) => (
+                    <motion.div key={p.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+                      <PropertyCard property={p} viewMode={viewMode} />
+                    </motion.div>
                   ))}
                 </AnimatePresence>
               </div>
-
-              {/* Pagination / Load More */}
-              {showPagination && (
-                <div className="mt-8 flex flex-col items-center gap-4">
-                  <div className="flex items-center gap-4">
-                    <Button
-                      variant="outline"
-                      onClick={() => setPage(p => Math.max(1, p - 1))}
-                      disabled={page === 1}
-                      className="dark:border-gray-700 dark:text-gray-300"
-                    >
-                      Previous
-                    </Button>
-                    <span className="text-sm text-gray-600 dark:text-gray-400">
-                      Page {page} of {totalPages}
-                    </span>
-                    <Button
-                      variant="outline"
-                      onClick={() => setPage(p => p + 1)}
-                      disabled={page >= totalPages}
-                      className="dark:border-gray-700 dark:text-gray-300"
-                    >
-                      Next
-                    </Button>
-                  </div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Showing {paginatedProperties.length} of {filteredAndSortedProperties.length} properties
-                  </p>
+              {paginationMode === 'pagination' && totalPages > 1 && (
+                <div className="mt-8 flex justify-center gap-4 items-center">
+                  <Button variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</Button>
+                  <span className="text-sm text-muted-foreground">Page {page} of {totalPages}</span>
+                  <Button variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next</Button>
                 </div>
               )}
-
-              {showLoadMore && (
-                <div className="mt-8 flex flex-col items-center gap-4">
-                  <Button
-                    variant="outline"
-                    onClick={loadMore}
-                    disabled={isPending}
-                    className="min-w-48 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-                  >
-                    {isPending ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Loading...
-                      </>
-                    ) : (
-                      'Load More Properties'
-                    )}
+              {paginationMode === 'load-more' && hasMore && (
+                <div className="mt-8 flex justify-center">
+                  <Button variant="outline" onClick={() => setPage((p) => p + 1)} disabled={isPending}>
+                    {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Load more'}
                   </Button>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Showing {paginatedProperties.length} of {filteredAndSortedProperties.length} properties
-                  </p>
                 </div>
               )}
             </>
@@ -1104,72 +546,42 @@ export default function SearchContent() {
         </div>
       </div>
 
-      {/* Mobile Filter Sheet */}
       <Sheet open={isFilterOpen} onOpenChange={setIsFilterOpen}>
-        <SheetContent side="left" className="w-full sm:max-w-md p-0 dark:bg-gray-900 dark:border-gray-800">
+        <SheetContent side="left" className="w-full sm:max-w-md p-0">
           <div className="flex flex-col h-full">
-            <div className="flex justify-between items-center p-4 border-b dark:border-gray-800">
-              <SheetTitle className="flex items-center gap-2 text-gray-900 dark:text-white">
-                <Filter className="h-5 w-5" />
-                Filters
-                {activeFilterCount > 0 && (
-                  <Badge variant="secondary" className="ml-2 dark:bg-gray-800 dark:text-gray-300">
-                    {activeFilterCount}
-                  </Badge>
-                )}
-              </SheetTitle>
-              <SheetClose asChild>
-                <Button variant="ghost" size="icon" className="dark:text-gray-400 dark:hover:text-white">
-                  <X className="h-4 w-4" />
-                </Button>
-              </SheetClose>
+            <div className="flex justify-between items-center p-4 border-b">
+              <SheetTitle>Filters</SheetTitle>
+              <SheetClose asChild><Button variant="ghost" size="icon"><X className="h-4 w-4" /></Button></SheetClose>
             </div>
-
             <div className="flex-1 overflow-y-auto p-4">
-              <FilterContent
-                filters={filters}
-                onFilterChange={handleFilterChange}
-                onClearFilters={clearFilters}
-                hasActiveFilters={hasActiveFilters}
-              />
+              <FilterContent filters={filters} onFilterChange={handleFilterChange}
+                onClearFilters={clearFilters} hasActiveFilters={hasActiveFilters} />
             </div>
-
-            <div className="p-4 border-t dark:border-gray-800 bg-gray-50 dark:bg-gray-950">
-              <Button
-                className="w-full dark:bg-primary-500 dark:hover:bg-primary-600"
-                onClick={() => setIsFilterOpen(false)}
-              >
-                Apply Filters
-              </Button>
+            <div className="p-4 border-t">
+              <Button className="w-full" onClick={() => setIsFilterOpen(false)}>Apply</Button>
             </div>
           </div>
         </SheetContent>
       </Sheet>
 
-      {/* Save Search Dialog */}
       <Dialog open={isSaveSearchDialogOpen} onOpenChange={setIsSaveSearchDialogOpen}>
-        <DialogContent className="dark:bg-gray-900 dark:border-gray-800">
-          <DialogHeader>
-            <DialogTitle className="text-gray-900 dark:text-white">Save Search</DialogTitle>
-          </DialogHeader>
-          <div className="py-4">
-            <Label htmlFor="search-name" className="text-gray-700 dark:text-gray-300">Search Name</Label>
-            <Input
-              id="search-name"
-              placeholder="e.g., Mbabane Apartments under E2000"
-              value={searchName}
-              onChange={(e) => setSearchName(sanitizeInput(e.target.value))}
-              className="mt-2 dark:bg-gray-800 dark:border-gray-700 dark:text-white"
-            />
-          </div>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Save search</DialogTitle></DialogHeader>
+          <Input placeholder="e.g. Mbabane land under E200k" value={searchName}
+            onChange={(e) => setSearchName(sanitizeInput(e.target.value))} />
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsSaveSearchDialogOpen(false)} className="dark:border-gray-700 dark:text-gray-300">
-              Cancel
-            </Button>
-            <Button onClick={saveCurrentSearch} disabled={!searchName.trim()} className="dark:bg-primary-500 dark:hover:bg-primary-600">
-              <Bookmark className="mr-2 h-4 w-4" />
-              Save Search
-            </Button>
+            <Button variant="outline" onClick={() => setIsSaveSearchDialogOpen(false)}>Cancel</Button>
+            <Button
+              disabled={!searchName.trim()}
+              onClick={() => {
+                const next = [{ name: searchName.trim(), filters: { ...filters }, createdAt: Date.now() }, ...savedSearches].slice(0, 10);
+                setSavedSearches(next);
+                localStorage.setItem('savedSearches', JSON.stringify(next));
+                setIsSaveSearchDialogOpen(false);
+                setSearchName('');
+                toast.success('Search saved');
+              }}
+            >Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
