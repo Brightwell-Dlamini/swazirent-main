@@ -8,6 +8,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useVerification } from '@/hooks/useVerification';
 import { usePhoneVerification } from '@/hooks/usePhoneVerification';
 import { useListingPhotos } from '@/hooks/useListingPhotos';
+import { useLocalDraft } from '@/hooks/useLocalDraft';
 import { supabase } from '@/lib/supabase';
 import { saveListingRow } from '@/lib/saveListing';
 import {
@@ -42,6 +43,7 @@ import { TenureBadge } from '@/components/properties/TenureBadge';
 import { PhoneVerifyDialog } from '@/components/auth/PhoneVerifyDialog';
 import { ContactPhoneFields } from '@/components/listings/ContactPhoneFields';
 import { PhotoGrid } from '@/components/listings/PhotoGrid';
+import { DraftRestoreBanner } from '@/components/listings/DraftRestoreBanner';
 import { cn } from '@/lib/utils';
 
 const TOTAL_STEPS = 5;
@@ -70,6 +72,40 @@ function Field({
   );
 }
 
+const emptyForm = {
+  asset_category: '' as AssetCategory | '',
+  listing_intent: '' as ListingIntent | '',
+  property_subtype: '',
+  title: '',
+  description: '',
+  tenure_type: 'unsure' as TenureType,
+  price: '',
+  city: '',
+  suburb: '',
+  address: '',
+  bedrooms: '1',
+  bathrooms: '1',
+  is_furnished: false,
+  land_size_ha: '',
+  is_fenced: false,
+  has_road_access: false,
+  has_water: false,
+  has_electricity: false,
+  has_sewer: false,
+  zoning_notes: '',
+  floor_area_sqm: '',
+  floors: '',
+  parking_bays: '',
+  fit_out: '' as FitOut | '',
+  has_loading_bay: false,
+  has_street_frontage: false,
+  power_notes: '',
+  amenities: [] as string[],
+  lease_terms: '',
+  contact_whatsapp: '',
+  contact_phone: '',
+};
+
 export default function AddPropertyPage() {
   const { user, userType, isLoading: authLoading } = useAuth();
   const { isLandlordVerified, isLandlordPending, refreshVerification } = useVerification();
@@ -88,44 +124,18 @@ export default function AddPropertyPage() {
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
   const [phoneDialogOpen, setPhoneDialogOpen] = useState(false);
+  const [offerRestore, setOfferRestore] = useState(false);
 
-  const [formData, setFormData] = useState({
-    asset_category: '' as AssetCategory | '',
-    listing_intent: '' as ListingIntent | '',
-    property_subtype: '',
-    title: '',
-    description: '',
-    tenure_type: 'unsure' as TenureType,
-    price: '',
-    city: '',
-    suburb: '',
-    address: '',
-    bedrooms: '1',
-    bathrooms: '1',
-    is_furnished: false,
-    land_size_ha: '',
-    is_fenced: false,
-    has_road_access: false,
-    has_water: false,
-    has_electricity: false,
-    has_sewer: false,
-    zoning_notes: '',
-    floor_area_sqm: '',
-    floors: '',
-    parking_bays: '',
-    fit_out: '' as FitOut | '',
-    has_loading_bay: false,
-    has_street_frontage: false,
-    power_notes: '',
-    amenities: [] as string[],
-    lease_terms: '',
-    contact_whatsapp: '',
-    contact_phone: '',
-  });
+  const [formData, setFormData] = useState({ ...emptyForm });
+  const { load, clear, hasDraft } = useLocalDraft(formData, { intervalMs: 30000 });
 
   const isLand = formData.asset_category === 'land';
   const isResidential = formData.asset_category === 'residential';
   const isCommercial = formData.asset_category === 'commercial';
+
+  useEffect(() => {
+    if (hasDraft) setOfferRestore(true);
+  }, [hasDraft]);
 
   useEffect(() => {
     if (!accountPhone) return;
@@ -151,7 +161,6 @@ export default function AddPropertyPage() {
     }
   }, [user, userType, isLandlordPending, refreshVerification]);
 
-  /** Map field → wizard step */
   const fieldStep = (key: string): number => {
     if (['asset_category', 'listing_intent', 'property_subtype'].includes(key)) return 1;
     if (['title', 'description', 'price', 'tenure_type'].includes(key)) return 2;
@@ -267,6 +276,7 @@ export default function AddPropertyPage() {
         try { await uploadPhotos(result.id); }
         catch { toast.warning('Draft saved, but some photos failed'); }
       }
+      clear();
       toast.success('Draft saved');
       router.push('/dashboard/landlord');
     } catch (e) {
@@ -319,6 +329,7 @@ export default function AddPropertyPage() {
       }
       try { await uploadPhotos(result.id); }
       catch { toast.warning('Submitted, but some photos failed'); }
+      clear();
       toast.success('Submitted for review');
       router.push('/dashboard/landlord');
     } catch (err) {
@@ -636,6 +647,22 @@ export default function AddPropertyPage() {
       <h1 className="text-3xl font-bold mb-1 tracking-tight">Add listing</h1>
       <p className="text-muted-foreground mb-6">Residential, land, or commercial</p>
 
+      <DraftRestoreBanner
+        visible={offerRestore}
+        onRestore={() => {
+          const d = load();
+          if (d) {
+            setFormData((p) => ({ ...p, ...d }));
+            toast.success('Draft restored');
+          }
+          setOfferRestore(false);
+        }}
+        onDiscard={() => {
+          clear();
+          setOfferRestore(false);
+        }}
+      />
+
       {!isLandlordVerified && (
         <Card className="border-amber-500/30 bg-amber-500/10 mb-6">
           <CardContent className="p-4 flex gap-3">
@@ -645,7 +672,6 @@ export default function AddPropertyPage() {
         </Card>
       )}
 
-      {/* Clickable steps */}
       <div className="mb-6 flex justify-between gap-1">
         {STEP_LABELS.map((label, i) => {
           const step = i + 1;
