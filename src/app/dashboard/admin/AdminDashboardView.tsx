@@ -408,11 +408,32 @@ export default function AdminDashboardView() {
       </div>
 
       <Tabs defaultValue="users" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-5 h-auto gap-1">
-          <TabsTrigger value="users" className="text-xs sm:text-sm">Users</TabsTrigger>
-          <TabsTrigger value="properties" className="text-xs sm:text-sm">Properties</TabsTrigger>
+        <TabsList className="w-full h-auto flex flex-wrap gap-1 justify-start">
+          <TabsTrigger value="users" className="text-xs sm:text-sm">
+            Users
+            {(stats?.pendingVerifications || 0) > 0 && (
+              <Badge className="ml-1 bg-purple-500/20 text-purple-700 dark:text-purple-300 text-[10px]">
+                {stats?.pendingVerifications}
+              </Badge>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="properties" className="text-xs sm:text-sm">
+            Properties
+            {(stats?.pendingProperties || 0) > 0 && (
+              <Badge className="ml-1 bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[10px]">
+                {stats?.pendingProperties}
+              </Badge>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="verifications" className="text-xs sm:text-sm">Verifications</TabsTrigger>
-          <TabsTrigger value="reports" className="text-xs sm:text-sm">Reports</TabsTrigger>
+          <TabsTrigger value="reports" className="text-xs sm:text-sm">
+            Reports
+            {(stats?.pendingReports || 0) > 0 && (
+              <Badge variant="destructive" className="ml-1 text-[10px]">
+                {stats?.pendingReports}
+              </Badge>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="activity" className="text-xs sm:text-sm">Activity</TabsTrigger>
         </TabsList>
 
