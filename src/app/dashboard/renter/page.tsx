@@ -1,10 +1,11 @@
-// src/app/dashboard/renter/page.tsx
+// src/app/dashboard/renter/page.tsx — Seeker dashboard (route path kept for compatibility)
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
+import { canPostListings, getUserTypeLabel, isSeekerRole } from '@/types/user';
 import { supabase } from '@/lib/supabase';
 import { Property } from '@/types/property';
 import { Button } from '@/components/ui/button';
@@ -54,8 +55,8 @@ interface SearchAlert {
   last_notified_at?: string;
 }
 
-export default function RenterDashboard() {
-  const { user, isLoading: authLoading, isInitialized } = useAuth();
+export default function SeekerDashboard() {
+  const { user, userType, isLoading: authLoading, isInitialized } = useAuth();
   const router = useRouter();
   const [savedProperties, setSavedProperties] = useState<SavedProperty[]>([]);
   const [searchAlerts, setSearchAlerts] = useState<SearchAlert[]>([]);
@@ -68,16 +69,21 @@ export default function RenterDashboard() {
   useEffect(() => {
     if (!authLoading && !user) {
       router.push('/auth/login');
+      return;
     }
-  }, [user, authLoading, router]);
+    // Posters belong on the listings dashboard
+    if (!authLoading && user && canPostListings(userType) && userType !== 'admin') {
+      router.replace('/dashboard/landlord');
+    }
+  }, [user, userType, authLoading, router]);
 
   const fetchSavedProperties = useCallback(async () => {
     if (!user) return;
-
     try {
       const { data, error } = await supabase
         .from('saved_properties')
-        .select(`
+        .select(
+          `
           id,
           property_id,
           properties:property_id (
@@ -95,18 +101,19 @@ export default function RenterDashboard() {
               display_order
             )
           )
-        `)
+        `
+        )
         .eq('renter_id', user.id);
 
       if (error) throw error;
 
-      const transformedData: SavedProperty[] = (data || []).map((item: any) => ({
-        id: item.id,
-        property_id: item.property_id,
-        properties: item.properties,
-      }));
-
-      setSavedProperties(transformedData);
+      setSavedProperties(
+        (data || []).map((item: any) => ({
+          id: item.id,
+          property_id: item.property_id,
+          properties: item.properties,
+        }))
+      );
     } catch (error) {
       console.error('Error fetching saved properties:', error);
       toast.error('Failed to load saved properties');
@@ -115,7 +122,6 @@ export default function RenterDashboard() {
 
   const fetchSearchAlerts = useCallback(async () => {
     if (!user) return;
-
     try {
       const { data, error } = await supabase
         .from('search_alerts')
@@ -139,7 +145,6 @@ export default function RenterDashboard() {
     }
   }, [user, fetchSavedProperties, fetchSearchAlerts]);
 
-  // Cleanup
   useEffect(() => {
     return () => {
       isMounted.current = false;
@@ -148,16 +153,11 @@ export default function RenterDashboard() {
 
   async function removeSavedProperty(id: string) {
     try {
-      const { error } = await supabase
-        .from('saved_properties')
-        .delete()
-        .eq('id', id);
-
+      const { error } = await supabase.from('saved_properties').delete().eq('id', id);
       if (error) throw error;
-      setSavedProperties(savedProperties.filter((p) => p.id !== id));
+      setSavedProperties((prev) => prev.filter((p) => p.id !== id));
       toast.success('Property removed from saved');
-    } catch (error) {
-      console.error('Error removing saved property:', error);
+    } catch {
       toast.error('Failed to remove property');
     }
   }
@@ -168,34 +168,23 @@ export default function RenterDashboard() {
         .from('search_alerts')
         .update({ is_active: !currentStatus })
         .eq('id', alertId);
-
       if (error) throw error;
-      setSearchAlerts(
-        searchAlerts.map((alert) =>
-          alert.id === alertId
-            ? { ...alert, is_active: !currentStatus }
-            : alert
-        )
+      setSearchAlerts((prev) =>
+        prev.map((a) => (a.id === alertId ? { ...a, is_active: !currentStatus } : a))
       );
       toast.success(`Alert ${!currentStatus ? 'activated' : 'paused'}`);
-    } catch (error) {
-      console.error('Error toggling alert:', error);
+    } catch {
       toast.error('Failed to update alert');
     }
   }
 
   async function deleteAlert(alertId: string) {
     try {
-      const { error } = await supabase
-        .from('search_alerts')
-        .delete()
-        .eq('id', alertId);
-
+      const { error } = await supabase.from('search_alerts').delete().eq('id', alertId);
       if (error) throw error;
-      setSearchAlerts(searchAlerts.filter((a) => a.id !== alertId));
+      setSearchAlerts((prev) => prev.filter((a) => a.id !== alertId));
       toast.success('Alert deleted');
-    } catch (error) {
-      console.error('Error deleting alert:', error);
+    } catch {
       toast.error('Failed to delete alert');
     }
   }
@@ -208,74 +197,51 @@ export default function RenterDashboard() {
 
   const handleRenameAlert = async () => {
     if (!editingAlert || !alertName.trim()) return;
-
     try {
       const { error } = await supabase
         .from('search_alerts')
         .update({ name: alertName.trim() })
         .eq('id', editingAlert.id);
-
       if (error) throw error;
-
-      setSearchAlerts(
-        searchAlerts.map((alert) =>
-          alert.id === editingAlert.id
-            ? { ...alert, name: alertName.trim() }
-            : alert
-        )
+      setSearchAlerts((prev) =>
+        prev.map((a) => (a.id === editingAlert.id ? { ...a, name: alertName.trim() } : a))
       );
-      toast.success('Alert renamed successfully');
+      toast.success('Alert renamed');
       setIsEditDialogOpen(false);
-      setEditingAlert(null);
-      setAlertName('');
-    } catch (error) {
-      console.error('Error renaming alert:', error);
+    } catch {
       toast.error('Failed to rename alert');
     }
   };
 
   const formatAlertCriteria = (criteria: SearchAlert['criteria']) => {
-    const parts = [];
+    const parts: string[] = [];
     if (criteria.keyword) parts.push(`"${criteria.keyword}"`);
     if (criteria.city) parts.push(criteria.city);
-    if (criteria.minPrice && criteria.maxPrice) {
-      parts.push(`E${criteria.minPrice}-E${criteria.maxPrice}`);
-    } else if (criteria.minPrice) {
-      parts.push(`E${criteria.minPrice}+`);
-    } else if (criteria.maxPrice) {
-      parts.push(`Under E${criteria.maxPrice}`);
-    }
+    if (criteria.minPrice && criteria.maxPrice) parts.push(`E${criteria.minPrice}-E${criteria.maxPrice}`);
+    else if (criteria.minPrice) parts.push(`E${criteria.minPrice}+`);
+    else if (criteria.maxPrice) parts.push(`Under E${criteria.maxPrice}`);
     if (criteria.bedrooms) parts.push(`${criteria.bedrooms}+ beds`);
-    if (criteria.propertyType?.length) {
-      parts.push(criteria.propertyType.map(t => t).join('/'));
-    }
+    if (criteria.propertyType?.length) parts.push(criteria.propertyType.join('/'));
     return parts.join(' • ') || 'All properties';
   };
 
-  // Helper to get primary photo
   const getPrimaryPhoto = (photos?: any[]) => {
-    if (!photos || photos.length === 0) return null;
+    if (!photos?.length) return null;
     return [...photos].sort((a, b) => a.display_order - b.display_order)[0];
   };
 
-  // Show loading state - only during initial load
   if (!isInitialized || authLoading) {
     return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex justify-center items-center min-h-[400px]">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </div>
+      <div className="container mx-auto px-4 py-8 flex justify-center min-h-[400px] items-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
 
-  // Show loading for data
   if (loading) {
     return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex justify-center items-center min-h-[400px]">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </div>
+      <div className="container mx-auto px-4 py-8 flex justify-center min-h-[400px] items-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
@@ -283,196 +249,76 @@ export default function RenterDashboard() {
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold">Renter Dashboard</h1>
-        <p className="text-gray-600">
-          Manage your saved properties and search alerts
-        </p>
+        <h1 className="text-3xl font-bold">Seeker dashboard</h1>
+        <p className="text-gray-600">Saved properties and search alerts</p>
       </div>
 
       <Tabs defaultValue="saved" className="space-y-6">
         <TabsList>
           <TabsTrigger value="saved" className="flex items-center gap-2">
             <Heart className="h-4 w-4" />
-            Saved Properties
+            Saved
             {savedProperties.length > 0 && (
-              <Badge variant="secondary" className="ml-1">
-                {savedProperties.length}
-              </Badge>
+              <Badge variant="secondary">{savedProperties.length}</Badge>
             )}
           </TabsTrigger>
           <TabsTrigger value="alerts" className="flex items-center gap-2">
             <Bell className="h-4 w-4" />
-            Search Alerts
-            {searchAlerts.length > 0 && (
-              <Badge variant="secondary" className="ml-1">
-                {searchAlerts.filter(a => a.is_active).length}
-              </Badge>
-            )}
+            Alerts
           </TabsTrigger>
           <TabsTrigger value="profile" className="flex items-center gap-2">
             <Settings className="h-4 w-4" />
-            Profile Settings
+            Profile
           </TabsTrigger>
         </TabsList>
 
-        {/* Saved Properties Tab */}
         <TabsContent value="saved">
           {savedProperties.length === 0 ? (
             <Card>
               <CardContent className="py-12 text-center">
                 <Heart className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-                <h3 className="text-lg font-semibold mb-2">
-                  No saved properties yet
-                </h3>
-                <p className="text-gray-500 mb-4">
-                  Start saving properties you&apos;re interested in to compare
-                  them later.
-                </p>
+                <h3 className="text-lg font-semibold mb-2">No saved properties yet</h3>
+                <p className="text-gray-500 mb-4">Save listings while you browse.</p>
                 <Button asChild>
-                  <Link href="/search">Browse Properties</Link>
+                  <Link href="/search">Browse properties</Link>
                 </Button>
               </CardContent>
             </Card>
           ) : (
             <div className="grid md:grid-cols-2 gap-4">
-              {savedProperties.map((item) => {
-                const primaryPhoto = getPrimaryPhoto(item.properties.photos);
-                return (
-                  <Card key={item.id} className="hover:shadow-lg transition-shadow">
-                    <CardContent className="p-4">
-                      <div className="flex justify-between items-start mb-2">
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-semibold text-lg truncate">
-                            <Link
-                              href={`/properties/${item.properties.id}`}
-                              className="hover:text-primary"
-                            >
-                              {item.properties.title}
-                            </Link>
-                          </h3>
-                          <div className="flex items-center text-gray-500 text-sm">
-                            <MapPin className="h-3 w-3 mr-1 shrink-0" />
-                            <span className="truncate">
-                              {item.properties.location_suburb},{' '}
-                              {item.properties.location_city}
-                            </span>
-                          </div>
-                        </div>
-                        <Badge
-                          variant={
-                            item.properties.status === 'active'
-                              ? 'default'
-                              : 'secondary'
-                          }
-                          className="shrink-0 ml-2"
-                        >
-                          {item.properties.status}
-                        </Badge>
-                      </div>
-                      <div className="flex justify-between items-center mt-4">
-                        <div>
-                          <span className="text-xl font-bold text-primary">
-                            E{item.properties.price.toLocaleString()}/month
-                          </span>
-                          <span className="text-sm text-gray-500 ml-2">
-                            {item.properties.bedrooms || 0} bed •{' '}
-                            {item.properties.bathrooms || 0} bath
-                          </span>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button variant="outline" size="sm" asChild>
-                            <Link href={`/properties/${item.properties.id}`}>
-                              View
-                            </Link>
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => removeSavedProperty(item.id)}
-                            className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          )}
-        </TabsContent>
-
-        {/* Search Alerts Tab */}
-        <TabsContent value="alerts">
-          {searchAlerts.length === 0 ? (
-            <Card>
-              <CardContent className="py-12 text-center">
-                <Bell className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-                <h3 className="text-lg font-semibold mb-2">No search alerts</h3>
-                <p className="text-gray-500 mb-4">
-                  Create alerts to get notified when new properties match your
-                  criteria.
-                </p>
-                <Button asChild>
-                  <Link href="/search">Create Alert</Link>
-                </Button>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-4">
-              {searchAlerts.map((alert) => (
-                <Card key={alert.id} className="hover:shadow-md transition-shadow">
+              {savedProperties.map((item) => (
+                <Card key={item.id}>
                   <CardContent className="p-4">
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-semibold truncate">
-                            {alert.name || 'Untitled Alert'}
-                          </h3>
-                          <Badge
-                            variant={alert.is_active ? 'default' : 'secondary'}
-                            className="shrink-0"
-                          >
-                            {alert.is_active ? 'Active' : 'Paused'}
-                          </Badge>
-                        </div>
-                        <p className="text-sm text-gray-600 mt-1 flex items-center gap-1">
-                          <Search className="h-3 w-3" />
-                          {formatAlertCriteria(alert.criteria)}
+                    <div className="flex justify-between gap-2">
+                      <div className="min-w-0">
+                        <Link
+                          href={`/properties/${item.properties.id}`}
+                          className="font-semibold hover:text-primary truncate block"
+                        >
+                          {item.properties.title}
+                        </Link>
+                        <p className="text-sm text-gray-500 flex items-center gap-1">
+                          <MapPin className="h-3 w-3" />
+                          {item.properties.location_suburb}, {item.properties.location_city}
                         </p>
-                        <div className="flex items-center gap-4 mt-1 text-xs text-gray-500">
-                          <span className="flex items-center gap-1">
-                            <Clock className="h-3 w-3" />
-                            Created: {new Date(alert.created_at).toLocaleDateString()}
-                          </span>
-                          {alert.last_notified_at && (
-                            <span>
-                              Last notified: {new Date(alert.last_notified_at).toLocaleDateString()}
-                            </span>
-                          )}
-                        </div>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openEditDialog(alert)}
-                        >
-                          Rename
-                        </Button>
-                        <Button
-                          variant={alert.is_active ? 'default' : 'outline'}
-                          size="sm"
-                          onClick={() => toggleAlert(alert.id, alert.is_active)}
-                        >
-                          {alert.is_active ? 'Active' : 'Paused'}
+                      <Badge variant={item.properties.status === 'active' ? 'default' : 'secondary'}>
+                        {item.properties.status}
+                      </Badge>
+                    </div>
+                    <div className="flex justify-between items-center mt-4">
+                      <span className="font-bold text-primary">
+                        E{item.properties.price?.toLocaleString()}/mo
+                      </span>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" asChild>
+                          <Link href={`/properties/${item.properties.id}`}>View</Link>
                         </Button>
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => deleteAlert(alert.id)}
-                          className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                          className="text-red-500"
+                          onClick={() => removeSavedProperty(item.id)}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -485,54 +331,108 @@ export default function RenterDashboard() {
           )}
         </TabsContent>
 
-        {/* Profile Settings Tab */}
+        <TabsContent value="alerts">
+          {searchAlerts.length === 0 ? (
+            <Card>
+              <CardContent className="py-12 text-center">
+                <Bell className="h-12 w-12 mx-auto text-gray-400 mb-4" />
+                <h3 className="text-lg font-semibold mb-2">No search alerts</h3>
+                <Button asChild>
+                  <Link href="/search">Create from search</Link>
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-4">
+              {searchAlerts.map((alert) => (
+                <Card key={alert.id}>
+                  <CardContent className="p-4 flex flex-col sm:flex-row justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-semibold">{alert.name || 'Untitled alert'}</h3>
+                        <Badge variant={alert.is_active ? 'default' : 'secondary'}>
+                          {alert.is_active ? 'Active' : 'Paused'}
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-gray-600 flex items-center gap-1 mt-1">
+                        <Search className="h-3 w-3" />
+                        {formatAlertCriteria(alert.criteria)}
+                      </p>
+                      <p className="text-xs text-gray-500 flex items-center gap-1 mt-1">
+                        <Clock className="h-3 w-3" />
+                        {new Date(alert.created_at).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={() => openEditDialog(alert)}>
+                        Rename
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={alert.is_active ? 'default' : 'outline'}
+                        onClick={() => toggleAlert(alert.id, alert.is_active)}
+                      >
+                        {alert.is_active ? 'Pause' : 'Activate'}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-500"
+                        onClick={() => deleteAlert(alert.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
         <TabsContent value="profile">
           <Card>
             <CardHeader>
-              <CardTitle>Profile Settings</CardTitle>
-              <CardDescription>
-                Manage your account information and preferences
-              </CardDescription>
+              <CardTitle>Profile</CardTitle>
+              <CardDescription>Account information</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
+              <div>
                 <label className="text-sm font-medium">Email</label>
                 <p className="text-gray-600">{user?.email}</p>
               </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Account Type</label>
-                <p className="text-gray-600 capitalize">Renter</p>
+              <div>
+                <label className="text-sm font-medium">Account type</label>
+                <p className="text-gray-600">{getUserTypeLabel(userType)}</p>
               </div>
-              <div className="flex gap-3">
+              <div className="flex gap-3 flex-wrap">
                 <Button variant="outline" asChild>
-                  <Link href="/profile">Edit Profile</Link>
+                  <Link href="/profile">Edit profile</Link>
                 </Button>
-                <Button variant="outline" asChild>
-                  <Link href="/auth/upgrade">
-                    <ArrowRight className="mr-2 h-4 w-4" />
-                    Become a Landlord
-                  </Link>
-                </Button>
+                {isSeekerRole(userType) && (
+                  <Button variant="outline" asChild>
+                    <Link href="/auth/upgrade">
+                      <ArrowRight className="mr-2 h-4 w-4" />
+                      List properties (broker)
+                    </Link>
+                  </Button>
+                )}
               </div>
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
 
-      {/* Rename Alert Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Rename Alert</DialogTitle>
-            <DialogDescription>
-              Give your search alert a descriptive name to easily identify it.
-            </DialogDescription>
+            <DialogTitle>Rename alert</DialogTitle>
+            <DialogDescription>Give this alert a clear name.</DialogDescription>
           </DialogHeader>
           <div className="py-4">
-            <Label htmlFor="alert-name">Alert Name</Label>
+            <Label htmlFor="alert-name">Name</Label>
             <Input
               id="alert-name"
-              placeholder="e.g., Mbabane Apartments Under E2000"
               value={alertName}
               onChange={(e) => setAlertName(e.target.value)}
               className="mt-2"
