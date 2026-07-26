@@ -1,10 +1,17 @@
 import type { Metadata } from 'next';
 import { createClient } from '@supabase/supabase-js';
-import { SITE_NAME, absoluteUrl, truncateMeta } from '@/lib/seo';
+import { JsonLd } from '@/components/seo/JsonLd';
+import {
+  SITE_NAME,
+  absoluteUrl,
+  truncateMeta,
+  realEstateListingJsonLd,
+  breadcrumbJsonLd,
+} from '@/lib/seo';
 
 type Props = { params: Promise<{ id: string }>; children: React.ReactNode };
 
-async function fetchPropertyMeta(id: string) {
+async function fetchProperty(id: string) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) return null;
@@ -12,7 +19,7 @@ async function fetchPropertyMeta(id: string) {
   const { data } = await supabase
     .from('properties')
     .select(
-      'id, title, description, price, price_period, location_city, location_suburb, status, listing_intent, photos:property_photos(photo_url, display_order)'
+      'id, title, description, price, price_period, location_city, location_suburb, location_address, status, listing_intent, asset_category, bedrooms, bathrooms, latitude, longitude, created_at, updated_at, photos:property_photos(photo_url, display_order)'
     )
     .eq('id', id)
     .maybeSingle();
@@ -25,7 +32,7 @@ export async function generateMetadata({
   params: Promise<{ id: string }>;
 }): Promise<Metadata> {
   const { id } = await params;
-  const p = await fetchPropertyMeta(id);
+  const p = await fetchProperty(id);
 
   if (!p || (p.status !== 'active' && p.status !== 'rented' && p.status !== 'taken')) {
     return {
@@ -47,7 +54,7 @@ export async function generateMetadata({
   const photos = ((p.photos as { photo_url: string; display_order?: number }[]) || [])
     .slice()
     .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0));
-  const image = photos[0]?.photo_url || absoluteUrl('/icons/icon.svg');
+  const image = photos[0]?.photo_url || absoluteUrl('/og-image.svg');
   const canonical = `/properties/${p.id}`;
 
   return {
@@ -76,6 +83,51 @@ export async function generateMetadata({
   };
 }
 
-export default function PropertyLayout({ children }: Props) {
-  return children;
+export default async function PropertyLayout({ children, params }: Props) {
+  const { id } = await params;
+  const p = await fetchProperty(id);
+
+  let listingLd: Record<string, unknown> | null = null;
+  let crumbsLd: Record<string, unknown> | null = null;
+
+  if (p && (p.status === 'active' || p.status === 'rented' || p.status === 'taken')) {
+    listingLd = realEstateListingJsonLd({
+      id: p.id,
+      title: p.title,
+      description: p.description,
+      price: Number(p.price) || 0,
+      price_period: p.price_period,
+      location_city: p.location_city,
+      location_suburb: p.location_suburb,
+      location_address: p.location_address,
+      bedrooms: p.bedrooms,
+      bathrooms: p.bathrooms,
+      status: p.status,
+      photos: p.photos as { photo_url: string; display_order?: number }[] | null,
+      latitude: p.latitude,
+      longitude: p.longitude,
+      created_at: p.created_at,
+      listing_intent: p.listing_intent,
+      asset_category: p.asset_category,
+    });
+    crumbsLd = breadcrumbJsonLd([
+      { name: 'Home', path: '/' },
+      { name: 'Search', path: '/search' },
+      {
+        name: p.location_city || 'Eswatini',
+        path: p.location_city
+          ? `/in/${encodeURIComponent(p.location_city.toLowerCase().replace(/\s+/g, '-'))}`
+          : '/search',
+      },
+      { name: p.title, path: `/properties/${p.id}` },
+    ]);
+  }
+
+  return (
+    <>
+      {listingLd && <JsonLd data={listingLd} />}
+      {crumbsLd && <JsonLd data={crumbsLd} />}
+      {children}
+    </>
+  );
 }
