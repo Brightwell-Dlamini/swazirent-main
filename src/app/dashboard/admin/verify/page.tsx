@@ -5,10 +5,10 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
-import { canPostListings, getUserTypeLabel, normalizeUserType, UserType } from '@/types/user';
+import { getUserTypeLabel, isPosterRole } from '@/types/user';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import {
@@ -38,7 +38,7 @@ interface PosterProfile {
   property_count: number;
 }
 
-const POSTER_TYPES = ['landlord', 'broker', 'agent'] as const;
+const POSTER_TYPES = ['landlord', 'broker', 'agent'];
 
 export default function AdminVerificationPage() {
   const { user, userType, isLoading } = useAuth();
@@ -46,7 +46,7 @@ export default function AdminVerificationPage() {
   const [posters, setPosters] = useState<PosterProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState('pending');
+  const [activeTab, setActiveTab] = useState('unverified');
 
   useEffect(() => {
     if (!isLoading && userType !== 'admin') {
@@ -61,30 +61,20 @@ export default function AdminVerificationPage() {
       const { data, error } = await supabase
         .from('profiles')
         .select(
-          `
-          id,
-          email,
-          full_name,
-          phone,
-          user_type,
-          is_verified,
-          verification_level,
-          created_at,
-          properties:properties(count)
-        `
+          `id, email, full_name, phone, user_type, is_verified, verification_level, created_at,
+           properties:properties(count)`
         )
-        .in('user_type', [...POSTER_TYPES])
+        .in('user_type', POSTER_TYPES)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
 
-      const formattedData =
-        data?.map((item: any) => ({
+      setPosters(
+        (data || []).map((item: any) => ({
           ...item,
           property_count: item.properties?.[0]?.count || 0,
-        })) || [];
-
-      setPosters(formattedData);
+        }))
+      );
     } catch (error) {
       console.error('Error fetching posters:', error);
       toast.error('Failed to load accounts for verification');
@@ -127,32 +117,26 @@ export default function AdminVerificationPage() {
     }
   };
 
-  const fetchPosters = fetchLandlords;
-
   useEffect(() => {
-    if (userType === 'admin') {
-      fetchLandlords();
-    }
-  }, [userType]);
+    if (userType === 'admin') fetchPosters();
+  }, [userType, fetchPosters]);
 
   if (isLoading || loading) {
     return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex justify-center items-center min-h-[400px]">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </div>
+      <div className="container mx-auto px-4 py-8 flex justify-center min-h-[400px] items-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
 
   const stats = {
-    total: landlords.length,
-    verified: landlords.filter((l) => l.is_verified).length,
-    unverified: landlords.filter((l) => !l.is_verified && l.verification_level !== 'rejected').length,
-    rejected: landlords.filter((l) => l.verification_level === 'rejected').length,
+    total: posters.length,
+    verified: posters.filter((l) => l.is_verified).length,
+    unverified: posters.filter((l) => !l.is_verified && l.verification_level !== 'rejected').length,
+    rejected: posters.filter((l) => l.verification_level === 'rejected').length,
   };
 
-  const filteredLandlords = landlords.filter((l) => {
+  const filtered = posters.filter((l) => {
     if (activeTab === 'verified') return l.is_verified;
     if (activeTab === 'unverified') return !l.is_verified && l.verification_level !== 'rejected';
     if (activeTab === 'rejected') return l.verification_level === 'rejected';
@@ -160,64 +144,44 @@ export default function AdminVerificationPage() {
   });
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-5xl">
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-8">
+    <div className="container mx-auto px-3 sm:px-4 py-6 sm:py-8 max-w-5xl">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4 mb-6">
         <div>
           <Button variant="ghost" size="sm" className="mb-2 -ml-2" asChild>
-            <a href="/dashboard/admin">← Back to admin</a>
+            <LinkBack />
           </Button>
           <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
             <Shield className="h-7 w-7 text-primary" />
             Poster verification
           </h1>
           <p className="text-muted-foreground text-sm sm:text-base">
-            Verify landlords, brokers, and agents before they publish
+            Verify landlords, brokers, and agents
           </p>
         </div>
-        <Button onClick={fetchLandlords} variant="outline" disabled={loading} className="self-start">
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+        <Button onClick={fetchPosters} variant="outline" size="sm" disabled={loading}>
+          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
         </Button>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mb-6">
-        <Card className="bg-card">
-          <CardContent className="p-3 sm:p-4">
-            <p className="text-xs sm:text-sm text-muted-foreground">Total posters</p>
-            <p className="text-xl sm:text-2xl font-bold">{stats.total}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-green-500/30 bg-green-500/10">
-          <CardContent className="p-3 sm:p-4">
-            <p className="text-xs sm:text-sm text-muted-foreground">Verified</p>
-            <p className="text-xl sm:text-2xl font-bold text-green-600 dark:text-green-400">{stats.verified}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-amber-500/30 bg-amber-500/10">
-          <CardContent className="p-3 sm:p-4">
-            <p className="text-xs sm:text-sm text-muted-foreground">Pending</p>
-            <p className="text-xl sm:text-2xl font-bold text-amber-600 dark:text-amber-400">{stats.unverified}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-red-500/30 bg-red-500/10">
-          <CardContent className="p-3 sm:p-4">
-            <p className="text-xs sm:text-sm text-muted-foreground">Rejected</p>
-            <p className="text-xl sm:text-2xl font-bold text-red-600 dark:text-red-400">{stats.rejected}</p>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <StatCard label="Total posters" value={stats.total} />
+        <StatCard label="Verified" value={stats.verified} tone="green" />
+        <StatCard label="Pending" value={stats.unverified} tone="amber" />
+        <StatCard label="Rejected" value={stats.rejected} tone="red" />
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="mb-6">
-        <TabsList className="w-full flex flex-wrap h-auto gap-1">
-          <TabsTrigger value="all" className="flex-1 min-w-[4.5rem]">All ({stats.total})</TabsTrigger>
-          <TabsTrigger value="unverified" className="flex-1 min-w-[4.5rem]">Pending ({stats.unverified})</TabsTrigger>
-          <TabsTrigger value="verified" className="flex-1 min-w-[4.5rem]">Verified ({stats.verified})</TabsTrigger>
-          <TabsTrigger value="rejected" className="flex-1 min-w-[4.5rem]">Rejected ({stats.rejected})</TabsTrigger>
+        <TabsList className="w-full h-auto flex flex-wrap gap-1">
+          <TabsTrigger value="all" className="flex-1 min-w-[4rem]">All ({stats.total})</TabsTrigger>
+          <TabsTrigger value="unverified" className="flex-1 min-w-[4rem]">Pending ({stats.unverified})</TabsTrigger>
+          <TabsTrigger value="verified" className="flex-1 min-w-[4rem]">Verified ({stats.verified})</TabsTrigger>
+          <TabsTrigger value="rejected" className="flex-1 min-w-[4rem]">Rejected ({stats.rejected})</TabsTrigger>
         </TabsList>
       </Tabs>
 
-      {filteredLandlords.length === 0 ? (
+      {filtered.length === 0 ? (
         <Card>
-          <CardContent className="p-8 sm:p-12 text-center">
+          <CardContent className="p-8 text-center">
             <Users className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
             <h2 className="text-xl font-bold mb-2">No accounts found</h2>
             <p className="text-muted-foreground">Nothing in this category.</p>
@@ -225,77 +189,63 @@ export default function AdminVerificationPage() {
         </Card>
       ) : (
         <div className="space-y-3">
-          {filteredLandlords.map((landlord) => {
-            const isVerified = landlord.is_verified;
-            const level = landlord.verification_level;
-            let statusColor =
+          {filtered.map((poster) => {
+            const isVerified = poster.is_verified;
+            const level = poster.verification_level;
+            let statusClass =
               'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30';
             let statusLabel = 'Pending';
             if (isVerified) {
-              statusColor = 'bg-green-500/15 text-green-700 dark:text-green-300 border-green-500/30';
+              statusClass =
+                'bg-green-500/15 text-green-700 dark:text-green-300 border-green-500/30';
               statusLabel = 'Verified';
             } else if (level === 'rejected') {
-              statusColor = 'bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/30';
+              statusClass = 'bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/30';
               statusLabel = 'Rejected';
             }
 
             return (
               <Card
-                key={landlord.id}
+                key={poster.id}
                 className={
                   !isVerified && level !== 'rejected'
                     ? 'border-amber-500/40 bg-amber-500/5'
                     : 'bg-card'
                 }
               >
-                <CardContent className="p-4 sm:p-6">
+                <CardContent className="p-4 sm:p-5">
                   <div className="flex flex-col sm:flex-row justify-between gap-4">
-                    <div className="space-y-1 flex-1 min-w-0">
+                    <div className="min-w-0 space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="font-semibold text-base sm:text-lg truncate">
-                          {landlord.full_name || 'Unknown'}
-                        </h3>
-                        <Badge className={statusColor}>{statusLabel}</Badge>
+                        <h3 className="font-semibold truncate">{poster.full_name || 'Unknown'}</h3>
+                        <Badge variant="outline">{getUserTypeLabel(poster.user_type as any)}</Badge>
+                        <Badge className={statusClass}>{statusLabel}</Badge>
                       </div>
-                      <p className="text-sm text-muted-foreground truncate">{landlord.email}</p>
-                      {landlord.phone && (
-                        <p className="text-sm text-muted-foreground">{landlord.phone}</p>
+                      <p className="text-sm text-muted-foreground truncate">{poster.email}</p>
+                      {poster.phone && (
+                        <p className="text-sm text-muted-foreground">{poster.phone}</p>
                       )}
                       <p className="text-xs text-muted-foreground">
-                        Joined {new Date(landlord.created_at).toLocaleDateString()}
+                        Joined {new Date(poster.created_at).toLocaleDateString()} ·{' '}
+                        {poster.property_count} listing(s)
                       </p>
                     </div>
-                    <div className="flex flex-row sm:flex-col gap-2 shrink-0">
-                      {!isVerified && level !== 'rejected' && (
-                        <>
-                          <Button
-                            size="sm"
-                            className="flex-1 bg-green-600 hover:bg-green-700 text-white"
-                            onClick={() => handleVerify(landlord.id, 'verify')}
-                            disabled={processing === landlord.id}
-                          >
-                            {processing === landlord.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <>
-                                <CheckCircle className="mr-1 h-4 w-4" /> Verify
-                              </>
-                            )}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            className="flex-1"
-                            onClick={() => {
-                              if (confirm(`Reject ${landlord.full_name || 'this account'}?`)) {
-                                handleVerify(landlord.id, 'reject');
-                              }
-                            }}
-                            disabled={processing === landlord.id}
-                          >
-                            <XCircle className="mr-1 h-4 w-4" /> Reject
-                          </Button>
-                        </>
+                    <div className="flex sm:flex-col gap-2 shrink-0">
+                      {(!isVerified || level === 'rejected') && (
+                        <Button
+                          size="sm"
+                          className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                          onClick={() => handleVerify(poster.id, 'verify')}
+                          disabled={processing === poster.id}
+                        >
+                          {processing === poster.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <>
+                              <CheckCircle className="mr-1 h-4 w-4" /> Verify
+                            </>
+                          )}
+                        </Button>
                       )}
                       {isVerified && (
                         <Button
@@ -303,35 +253,96 @@ export default function AdminVerificationPage() {
                           variant="outline"
                           className="text-red-600 dark:text-red-400"
                           onClick={() => {
-                            if (confirm(`Revoke verification for ${landlord.full_name || 'this account'}?`)) {
-                              handleVerify(landlord.id, 'reject');
+                            if (confirm(`Revoke verification for ${poster.full_name || 'this account'}?`)) {
+                              handleVerify(poster.id, 'reject');
                             }
                           }}
-                          disabled={processing === landlord.id}
+                          disabled={processing === poster.id}
                         >
                           <XCircle className="mr-1 h-4 w-4" /> Revoke
                         </Button>
                       )}
-                      {level === 'rejected' && !isVerified && (
+                      {!isVerified && level !== 'rejected' && (
                         <Button
                           size="sm"
-                          className="bg-green-600 hover:bg-green-700 text-white"
-                          onClick={() => handleVerify(landlord.id, 'verify')}
-                          disabled={processing === landlord.id}
+                          variant="destructive"
+                          className="flex-1"
+                          onClick={() => {
+                            if (confirm(`Reject ${poster.full_name || 'this account'}?`)) {
+                              handleVerify(poster.id, 'reject');
+                            }
+                          }}
+                          disabled={processing === poster.id}
                         >
-                          <CheckCircle className="mr-1 h-4 w-4" /> Verify
+                          <XCircle className="mr-1 h-4 w-4" /> Reject
                         </Button>
                       )}
                     </div>
                   </div>
                 </CardContent>
               </Card>
-                  );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
+
+function LinkBack() {
+  return (
+    <Link href="/dashboard/admin" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground">
+      <ChevronLeft className="h-4 w-4 mr-0.5" /> Back to admin
+    </Link>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone?: 'green' | 'amber' | 'red';
+}) {
+  const toneClass =
+    tone === 'green'
+      ? 'border-green-500/30 bg-green-500/10'
+      : tone === 'amber'
+        ? 'border-amber-500/30 bg-amber-500/10'
+        : tone === 'red'
+          ? 'border-red-500/30 bg-red-500/10'
+          : 'bg-card';
+  const valueClass =
+    tone === 'green'
+      ? 'text-green-600 dark:text-green-400'
+      : tone === 'amber'
+        ? 'text-amber-600 dark:text-amber-400'
+        : tone === 'red'
+          ? 'text-red-600 dark:text-red-400'
+          : '';
+  return (
+    <Card className={toneClass}>
+      <CardContent className="p-3 sm:p-4">
+        <p className="text-xs sm:text-sm text-muted-foreground">{label}</p>
+        <p className={`text-xl sm:text-2xl font-bold ${valueClass}`}>{value}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+// fix missing imports used above
+import Link from 'next/link';
+import { getUserTypeLabel } from '@/types/user';
+
+function LinkBack() {
+  return (
+    <Link href="/dashboard/admin" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground">
+      <ChevronLeft className="h-4 w-4 mr-0.5" /> Back to admin
+    </Link>
+  );
+}
+
+// re-declare fetch alias used earlier in broken draft - keep compile clean by real names only

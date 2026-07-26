@@ -1,11 +1,11 @@
 // src/types/user.ts
-// Ekhaya personas (canonical):
+// Ekhaya personas:
 //   seeker   — renter / buyer looking for property
 //   landlord — property owner who posts themselves
 //   broker   — facilitator hired to find tenants/buyers
 //   agent    — licensed / established estate agent
 //   admin    — platform admin
-// Legacy 'renter' still accepted and normalised to seeker.
+// Legacy 'renter' is normalised to seeker on read only.
 
 export type UserType =
   | 'seeker'
@@ -13,9 +13,7 @@ export type UserType =
   | 'broker'
   | 'agent'
   | 'admin'
-  | 'renter'; // legacy only — normalised to seeker on read
-
-export type CanonicalUserType = 'seeker' | 'landlord' | 'broker' | 'agent' | 'admin';
+  | 'renter'; // legacy — normalised to seeker
 
 export const isValidUserType = (type: string | null | undefined): type is UserType => {
   return (
@@ -28,11 +26,7 @@ export const isValidUserType = (type: string | null | undefined): type is UserTy
   );
 };
 
-/**
- * Normalises stored role values.
- * - renter → seeker (legacy rename only)
- * - landlord stays landlord (first-class poster role)
- */
+/** renter → seeker only; landlord stays landlord */
 export const normalizeUserType = (type: string | null | undefined): UserType => {
   if (!type) return 'seeker';
   if (type === 'renter') return 'seeker';
@@ -93,24 +87,20 @@ export const getUserTypeIcon = (userType: UserType | null): string => {
   }
 };
 
-/** Roles allowed to post listings (phone verification still required to publish) */
 export const canPostListings = (userType: UserType | null): boolean => {
   const t = normalizeUserType(userType);
   return t === 'landlord' || t === 'agent' || t === 'broker' || t === 'admin';
 };
 
-/** Poster roles that may need verification */
 export const isPosterRole = (userType: UserType | null): boolean => {
   const t = normalizeUserType(userType);
   return t === 'landlord' || t === 'agent' || t === 'broker';
 };
 
-/** Seeker (includes legacy renter) */
 export const isSeekerRole = (userType: UserType | null): boolean => {
   return normalizeUserType(userType) === 'seeker';
 };
 
-/** All filterable roles for admin UI */
 export const ADMIN_USER_TYPE_FILTERS: { value: string; label: string }[] = [
   { value: 'all', label: 'All users' },
   { value: 'seeker', label: 'Seekers' },
@@ -119,4 +109,12 @@ export const ADMIN_USER_TYPE_FILTERS: { value: string; label: string }[] = [
   { value: 'agent', label: 'Agents' },
   { value: 'admin', label: 'Admins' },
   { value: 'renter', label: 'Renters (legacy)' },
+];
+
+export const ASSIGNABLE_ROLES: { value: UserType; label: string }[] = [
+  { value: 'seeker', label: 'Seeker' },
+  { value: 'landlord', label: 'Landlord' },
+  { value: 'broker', label: 'Broker' },
+  { value: 'agent', label: 'Agent' },
+  { value: 'admin', label: 'Admin' },
 ];
