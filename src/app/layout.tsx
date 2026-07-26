@@ -15,6 +15,16 @@ import { InstallPrompt } from '@/components/pwa/InstallPrompt';
 import { Toaster } from 'sonner';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Providers } from './providers';
+import { JsonLd } from '@/components/seo/JsonLd';
+import {
+  SITE_URL,
+  SITE_NAME,
+  SITE_DESCRIPTION,
+  SITE_KEYWORDS,
+  SITE_TAGLINE,
+  organizationJsonLd,
+  websiteJsonLd,
+} from '@/lib/seo';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -22,53 +32,77 @@ const inter = Inter({
   variable: '--font-sans',
 });
 
-const SITE = process.env.NEXT_PUBLIC_SITE_URL || 'https://eswaproperty.vercel.app';
-
 export const metadata: Metadata = {
-  metadataBase: new URL(SITE),
+  metadataBase: new URL(SITE_URL),
   title: {
-    default: 'Ekhaya — Homes in Eswatini',
-    template: '%s · Ekhaya',
+    default: `${SITE_NAME} — ${SITE_TAGLINE}`,
+    template: `%s · ${SITE_NAME}`,
   },
-  description:
-    'Find verified homes, land, and commercial space across Eswatini. Search Manzini, Mbabane, and more — contact landlords directly.',
-  applicationName: 'Ekhaya',
-  keywords: [
-    'Eswatini rentals',
-    'Manzini houses',
-    'Mbabane apartment',
-    'land for sale Eswatini',
-    'Ekhaya',
-  ],
-  authors: [{ name: 'Ekhaya' }],
+  description: SITE_DESCRIPTION,
+  applicationName: SITE_NAME,
+  keywords: SITE_KEYWORDS,
+  authors: [{ name: SITE_NAME, url: SITE_URL }],
+  creator: SITE_NAME,
+  publisher: SITE_NAME,
+  category: 'real estate',
+  classification: 'Property marketplace',
+  referrer: 'origin-when-cross-origin',
   manifest: '/manifest.webmanifest',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
-    title: 'Ekhaya',
+    title: SITE_NAME,
   },
   formatDetection: {
     telephone: true,
+    email: true,
+    address: true,
+  },
+  alternates: {
+    canonical: '/',
   },
   openGraph: {
     type: 'website',
     locale: 'en_SZ',
-    siteName: 'Ekhaya',
-    title: 'Ekhaya — Homes in Eswatini',
-    description: 'Verified homes, land, and commercial listings across Eswatini.',
+    url: SITE_URL,
+    siteName: SITE_NAME,
+    title: `${SITE_NAME} — ${SITE_TAGLINE}`,
+    description: SITE_DESCRIPTION,
+    images: [
+      {
+        url: '/icons/icon.svg',
+        width: 512,
+        height: 512,
+        alt: `${SITE_NAME} — property in Eswatini`,
+      },
+    ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Ekhaya — Homes in Eswatini',
-    description: 'Verified homes, land, and commercial listings across Eswatini.',
+    title: `${SITE_NAME} — ${SITE_TAGLINE}`,
+    description: SITE_DESCRIPTION,
+    images: ['/icons/icon.svg'],
   },
-  robots: { index: true, follow: true },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+      'max-video-preview': -1,
+    },
+  },
   icons: {
     icon: [
       { url: '/icons/icon.svg', type: 'image/svg+xml' },
-      { url: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
     ],
-    apple: [{ url: '/icons/icon-192.png', sizes: '192x192' }],
+    apple: [{ url: '/icons/icon.svg' }],
+  },
+  other: {
+    'geo.region': 'SZ',
+    'geo.placename': 'Eswatini',
   },
 };
 
@@ -89,7 +123,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" suppressHydrationWarning className={inter.variable}>
+    <html lang="en-SZ" suppressHydrationWarning className={inter.variable}>
+      <head>
+        <JsonLd data={organizationJsonLd()} />
+        <JsonLd data={websiteJsonLd()} />
+      </head>
       <body className={`${inter.className} min-h-dvh flex flex-col`}>
         <a
           href="#main-content"
