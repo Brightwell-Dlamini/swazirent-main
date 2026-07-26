@@ -1,1 +1,2 @@
-FILE_CONTENT_FROM_DISK_admin_page_fixed
+// TEMP - will replace
+export default function AdminDashboard() { return null; }
