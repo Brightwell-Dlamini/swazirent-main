@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { Loader2, Smartphone } from 'lucide-react';
+import { Loader2, Smartphone, Copy, Check } from 'lucide-react';
 
 interface PhoneVerifyDialogProps {
   open: boolean;
@@ -30,6 +30,7 @@ export function PhoneVerifyDialog({
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [devCode, setDevCode] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -37,6 +38,7 @@ export function PhoneVerifyDialog({
       setStep('phone');
       setCode('');
       setDevCode(null);
+      setCopied(false);
     }
   }, [open, defaultPhone]);
 
@@ -51,6 +53,7 @@ export function PhoneVerifyDialog({
       return;
     }
     setLoading(true);
+    setDevCode(null);
     try {
       const token = await getToken();
       if (!token) {
@@ -70,11 +73,16 @@ export function PhoneVerifyDialog({
         toast.error(data.error || 'Failed to send code');
         return;
       }
-      if (data.devCode) setDevCode(data.devCode);
-      toast.success(data.message || 'Code sent');
+      if (data.devCode) {
+        setDevCode(data.devCode);
+        setCode(data.devCode); // pre-fill in dev so one less step
+        toast.message('Dev mode code ready', { description: data.devCode });
+      } else {
+        toast.success(data.message || 'Code sent');
+      }
       setStep('code');
     } catch {
-      toast.error('Network error');
+      toast.error('Network error — try again');
     } finally {
       setLoading(false);
     }
@@ -112,9 +120,20 @@ export function PhoneVerifyDialog({
       setCode('');
       setDevCode(null);
     } catch {
-      toast.error('Network error');
+      toast.error('Network error — try again');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const copyDevCode = async () => {
+    if (!devCode) return;
+    try {
+      await navigator.clipboard.writeText(devCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* ignore */
     }
   };
 
@@ -127,7 +146,7 @@ export function PhoneVerifyDialog({
             Verify your phone
           </DialogTitle>
           <DialogDescription>
-            One verification for your account. Listings will use this number.
+            One verification for your account. Listings reuse this number.
           </DialogDescription>
         </DialogHeader>
 
@@ -142,12 +161,32 @@ export function PhoneVerifyDialog({
               onChange={(e) => setPhone(e.target.value)}
               autoComplete="tel"
             />
-            <p className="text-xs text-muted-foreground">We’ll text a 6-digit code.</p>
+            <p className="text-xs text-muted-foreground">
+              We’ll text a 6-digit code (or show it here if SMS isn’t configured yet).
+            </p>
           </div>
         ) : (
           <div className="space-y-3 py-2">
+            {devCode && (
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 space-y-2">
+                <p className="text-xs font-medium text-amber-900 dark:text-amber-200">
+                  Dev mode — no SMS. Your code is:
+                </p>
+                <div className="flex items-center gap-2">
+                  <code className="text-2xl font-bold tracking-[0.3em] text-foreground flex-1 text-center">
+                    {devCode}
+                  </code>
+                  <Button type="button" size="icon" variant="outline" className="h-9 w-9" onClick={copyDevCode}>
+                    {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                  </Button>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  The database only stores a hash — this code is shown only when Twilio is not set.
+                </p>
+              </div>
+            )}
             <div className="space-y-2">
-              <Label htmlFor="otp-code">Code</Label>
+              <Label htmlFor="otp-code">6-digit code</Label>
               <Input
                 id="otp-code"
                 type="text"
@@ -159,14 +198,9 @@ export function PhoneVerifyDialog({
                 autoComplete="one-time-code"
                 className="tracking-widest text-center text-lg"
               />
-              {devCode && (
-                <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-500/10 p-2 rounded-md">
-                  Dev code: <strong>{devCode}</strong>
-                </p>
-              )}
             </div>
             <Button type="button" variant="link" className="px-0 h-auto text-sm" onClick={() => setStep('phone')}>
-              Change number
+              Change number / resend
             </Button>
           </div>
         )}
