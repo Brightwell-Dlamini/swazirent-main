@@ -4,6 +4,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { usePhoneVerification } from '@/hooks/usePhoneVerification';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,189 +13,160 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { Loader2, User, Mail, Phone, MapPin, Shield, Key, Save, RefreshCw } from 'lucide-react';
+import { Loader2, User, Mail, Phone, Shield, Key, Save, CheckCircle } from 'lucide-react';
 import { z } from 'zod';
+import { PhoneVerifyDialog } from '@/components/auth/PhoneVerifyDialog';
+import { getUserTypeLabel } from '@/types/user';
 
-// Validation schemas
 const profileSchema = z.object({
   fullName: z.string().min(2, 'Full name must be at least 2 characters'),
-  phone: z.string().min(10, 'Please enter a valid phone number'),
+  phone: z.string().min(8, 'Please enter a valid phone number'),
 });
 
-const passwordSchema = z.object({
-  currentPassword: z.string().min(1, 'Current password is required'),
-  newPassword: z.string().min(6, 'New password must be at least 6 characters'),
-  confirmPassword: z.string().min(6, 'Please confirm your password'),
-}).refine((data) => data.newPassword === data.confirmPassword, {
-  message: "Passwords don't match",
-  path: ['confirmPassword'],
-});
+const passwordSchema = z
+  .object({
+    currentPassword: z.string().min(1, 'Current password is required'),
+    newPassword: z.string().min(6, 'New password must be at least 6 characters'),
+    confirmPassword: z.string().min(6, 'Please confirm your password'),
+  })
+  .refine((d) => d.newPassword === d.confirmPassword, {
+    message: "Passwords don't match",
+    path: ['confirmPassword'],
+  });
 
 const emailSchema = z.object({
   newEmail: z.string().email('Please enter a valid email address'),
-  currentPassword: z.string().min(1, 'Current password is required to change email'),
+  currentPassword: z.string().min(1, 'Current password is required'),
 });
 
 export default function ProfilePage() {
   const { user, userType, profile, refreshUser } = useAuth();
+  const { isPhoneVerified, phone: verifiedPhone, refresh: refreshPhone } = usePhoneVerification();
   const router = useRouter();
 
   const [loading, setLoading] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [phoneDialogOpen, setPhoneDialogOpen] = useState(false);
 
-  // Profile form
-  const [profileData, setProfileData] = useState({
-    fullName: '',
-    phone: '',
-  });
-
-  // Password form
+  const [profileData, setProfileData] = useState({ fullName: '', phone: '' });
   const [passwordData, setPasswordData] = useState({
     currentPassword: '',
     newPassword: '',
     confirmPassword: '',
   });
+  const [emailData, setEmailData] = useState({ newEmail: '', currentPassword: '' });
 
-  // Email form
-  const [emailData, setEmailData] = useState({
-    newEmail: '',
-    currentPassword: '',
-  });
-
-  // Re-auth dialog
   const [showReAuthDialog, setShowReAuthDialog] = useState(false);
   const [reauthPassword, setReauthPassword] = useState('');
   const [reauthLoading, setReauthLoading] = useState(false);
   const [pendingAction, setPendingAction] = useState<'password' | 'email' | null>(null);
 
-  // Load profile data
   useEffect(() => {
     if (profile) {
       setProfileData({
         fullName: profile.fullName || '',
-        phone: profile.phone || '',
+        phone: profile.phone || verifiedPhone || '',
       });
     }
-  }, [profile]);
+  }, [profile, verifiedPhone]);
 
-  // Redirect if not logged in
   useEffect(() => {
-    if (!user) {
-      router.push('/auth/login');
-    }
+    if (!user) router.push('/auth/login');
   }, [user, router]);
 
-  // Helper to get Zod error message
-  const getZodErrorMessage = (error: z.ZodError): string => {
-    if (error.issues && error.issues.length > 0) {
-      return error.issues[0].message;
-    }
-    return 'Validation error';
-  };
+  const getZodErrorMessage = (err: z.ZodError) => err.issues[0]?.message || 'Validation error';
 
-  // Handle profile update
   const handleProfileUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccess(null);
-
     try {
-      // Validate
       const validated = profileSchema.parse(profileData);
-
       setProfileLoading(true);
 
-      // Update profile in database
+      const phoneChanged =
+        (profile?.phone || '').replace(/\s/g, '') !== validated.phone.replace(/\s/g, '');
+
+      const updatePayload: Record<string, unknown> = {
+        full_name: validated.fullName,
+        phone: validated.phone,
+        updated_at: new Date().toISOString(),
+      };
+
+      // Changing number requires re-verification
+      if (phoneChanged && isPhoneVerified) {
+        updatePayload.phone_verified_at = null;
+      }
+
       const { error: updateError } = await supabase
         .from('profiles')
-        .update({
-          full_name: validated.fullName,
-          phone: validated.phone,
-          updated_at: new Date().toISOString(),
-        })
+        .update(updatePayload)
         .eq('id', user?.id);
 
       if (updateError) throw updateError;
 
-      // Update user metadata
-      const { error: metadataError } = await supabase.auth.updateUser({
-        data: {
-          full_name: validated.fullName,
-          phone: validated.phone,
-        },
+      await supabase.auth.updateUser({
+        data: { full_name: validated.fullName, phone: validated.phone },
       });
 
-      if (metadataError) throw metadataError;
-
       await refreshUser();
-      setSuccess('Profile updated successfully!');
-      toast.success('Profile updated successfully!');
+      await refreshPhone();
 
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        setError(getZodErrorMessage(error));
-      } else if (error instanceof Error) {
-        setError(error.message);
+      if (phoneChanged && isPhoneVerified) {
+        setSuccess('Profile saved. Verify your new number below.');
+        toast.info('Verify your new phone number');
+        setPhoneDialogOpen(true);
       } else {
-        setError('Failed to update profile');
+        setSuccess('Profile updated');
+        toast.success('Profile updated');
       }
-      toast.error('Failed to update profile');
+    } catch (err) {
+      const msg =
+        err instanceof z.ZodError
+          ? getZodErrorMessage(err)
+          : err instanceof Error
+            ? err.message
+            : 'Failed to update profile';
+      setError(msg);
+      toast.error(msg);
     } finally {
       setProfileLoading(false);
     }
   };
 
-  // Handle password update with re-authentication
   const handlePasswordUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccess(null);
-
     try {
-      // Validate
       const validated = passwordSchema.parse(passwordData);
-
-      // First, verify current password by attempting to sign in
       if (!user?.email) {
         setError('User email not found');
         return;
       }
-
       setLoading(true);
-
-      // Verify current password
       const { error: signInError } = await supabase.auth.signInWithPassword({
         email: user.email,
         password: validated.currentPassword,
       });
-
       if (signInError) {
         setError('Current password is incorrect');
         toast.error('Current password is incorrect');
         setLoading(false);
         return;
       }
-
-      // Update password
       const { error: updateError } = await supabase.auth.updateUser({
         password: validated.newPassword,
       });
-
       if (updateError) {
-        // Check if re-authentication is required
         if (updateError.message?.includes('reauth') || updateError.status === 403) {
-          // Need to re-authenticate
           setPendingAction('password');
           setShowReAuthDialog(true);
           setLoading(false);
@@ -202,127 +174,87 @@ export default function ProfilePage() {
         }
         throw updateError;
       }
-
-      setSuccess('Password updated successfully!');
-      toast.success('Password updated successfully!');
-      setPasswordData({
-        currentPassword: '',
-        newPassword: '',
-        confirmPassword: '',
-      });
-
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        setError(getZodErrorMessage(error));
-      } else if (error instanceof Error) {
-        setError(error.message);
-      } else {
-        setError('Failed to update password');
-      }
-      toast.error('Failed to update password');
+      setSuccess('Password updated');
+      toast.success('Password updated');
+      setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    } catch (err) {
+      const msg =
+        err instanceof z.ZodError
+          ? getZodErrorMessage(err)
+          : err instanceof Error
+            ? err.message
+            : 'Failed to update password';
+      setError(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
   };
 
-  // Handle re-authentication
   const handleReAuth = async () => {
-    if (!user?.email) {
-      toast.error('User email not found');
-      return;
-    }
-
+    if (!user?.email) return;
     setReauthLoading(true);
     try {
-      // Verify current password
       const { error: signInError } = await supabase.auth.signInWithPassword({
         email: user.email,
         password: reauthPassword,
       });
-
       if (signInError) {
         toast.error('Incorrect password');
         setReauthLoading(false);
         return;
       }
-
-      // Perform the pending action
       if (pendingAction === 'password') {
         const { error: updateError } = await supabase.auth.updateUser({
           password: passwordData.newPassword,
         });
-
         if (updateError) throw updateError;
-
-        setSuccess('Password updated successfully!');
-        toast.success('Password updated successfully!');
-        setPasswordData({
-          currentPassword: '',
-          newPassword: '',
-          confirmPassword: '',
-        });
+        setSuccess('Password updated');
+        toast.success('Password updated');
+        setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
       } else if (pendingAction === 'email') {
         const { error: updateError } = await supabase.auth.updateUser({
           email: emailData.newEmail,
         });
-
         if (updateError) throw updateError;
-
-        setSuccess('Email update initiated! Please check your new email for verification.');
-        toast.success('Email update initiated! Check your new email for verification.');
-        setEmailData({
-          newEmail: '',
-          currentPassword: '',
-        });
+        setSuccess('Check your new email to confirm the change');
+        toast.success('Check your new email');
+        setEmailData({ newEmail: '', currentPassword: '' });
       }
-
       setShowReAuthDialog(false);
       setReauthPassword('');
       setPendingAction(null);
-
-    } catch (error) {
-      console.error('Re-auth error:', error);
+    } catch {
       toast.error('Failed to complete action');
     } finally {
       setReauthLoading(false);
     }
   };
 
-  // Handle email update
   const handleEmailUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccess(null);
-
     try {
-      // Validate
       const validated = emailSchema.parse(emailData);
-
-      // Verify current password
       if (!user?.email) {
         setError('User email not found');
         return;
       }
-
       setLoading(true);
-
       const { error: signInError } = await supabase.auth.signInWithPassword({
         email: user.email,
         password: validated.currentPassword,
       });
-
       if (signInError) {
         setError('Current password is incorrect');
         toast.error('Current password is incorrect');
         setLoading(false);
         return;
       }
-
-      // Update email
       const { error: updateError } = await supabase.auth.updateUser({
         email: validated.newEmail,
       });
-
       if (updateError) {
         if (updateError.message?.includes('reauth') || updateError.status === 403) {
           setPendingAction('email');
@@ -332,92 +264,117 @@ export default function ProfilePage() {
         }
         throw updateError;
       }
-
-      setSuccess('Email update initiated! Please check your new email for verification.');
-      toast.success('Email update initiated! Check your new email for verification.');
-      setEmailData({
-        newEmail: '',
-        currentPassword: '',
-      });
-
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        setError(getZodErrorMessage(error));
-      } else if (error instanceof Error) {
-        setError(error.message);
-      } else {
-        setError('Failed to update email');
-      }
-      toast.error('Failed to update email');
+      setSuccess('Check your new email to confirm');
+      toast.success('Check your new email');
+      setEmailData({ newEmail: '', currentPassword: '' });
+    } catch (err) {
+      const msg =
+        err instanceof z.ZodError
+          ? getZodErrorMessage(err)
+          : err instanceof Error
+            ? err.message
+            : 'Failed to update email';
+      setError(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
   };
 
-  if (!user) {
-    return null;
-  }
+  if (!user) return null;
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-4xl">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold">Profile Settings</h1>
-        <p className="text-gray-600">Manage your account information and security</p>
+        <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Profile</h1>
+        <p className="text-muted-foreground text-sm mt-1">Account, phone, and security</p>
       </div>
 
-      <div className="grid md:grid-cols-3 gap-8">
-        {/* Sidebar */}
+      <div className="grid md:grid-cols-3 gap-6 md:gap-8">
         <div className="md:col-span-1">
           <Card>
             <CardContent className="p-6 text-center">
-              <Avatar className="h-24 w-24 mx-auto mb-4">
+              <Avatar className="h-20 w-20 mx-auto mb-3">
                 <AvatarImage src={user.user_metadata?.avatar_url} />
-                <AvatarFallback className="text-2xl bg-primary/10 text-primary">
+                <AvatarFallback className="text-lg bg-primary/10 text-primary">
                   {user.email?.substring(0, 2).toUpperCase() || 'U'}
                 </AvatarFallback>
               </Avatar>
-              <h2 className="font-semibold text-lg">
+              <h2 className="font-semibold truncate">
                 {profile?.fullName || user.email?.split('@')[0] || 'User'}
               </h2>
-              <p className="text-sm text-gray-500 capitalize">{userType || 'User'}</p>
-              <p className="text-sm text-gray-500 truncate">{user.email}</p>
-              {profile?.isVerified && (
-                <div className="mt-2 inline-flex items-center gap-1 text-xs text-green-600 bg-green-50 px-2 py-1 rounded-full">
-                  <Shield className="h-3 w-3" />
-                  Verified
-                </div>
-              )}
+              <p className="text-sm text-muted-foreground">{getUserTypeLabel(userType)}</p>
+              <p className="text-xs text-muted-foreground truncate mt-0.5">{user.email}</p>
+              <div className="mt-3 flex flex-wrap justify-center gap-1.5">
+                {profile?.isVerified && (
+                  <Badge variant="secondary" className="text-xs gap-1">
+                    <Shield className="h-3 w-3" />Account verified
+                  </Badge>
+                )}
+                {isPhoneVerified ? (
+                  <Badge className="text-xs gap-1 bg-emerald-600 text-white border-0">
+                    <CheckCircle className="h-3 w-3" />Phone verified
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-xs text-amber-700 dark:text-amber-300">
+                    Phone not verified
+                  </Badge>
+                )}
+              </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Main Content */}
         <div className="md:col-span-2">
           <Tabs defaultValue="profile" className="space-y-6">
             <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="profile" className="flex items-center gap-2">
-                <User className="h-4 w-4" />
-                Profile
+              <TabsTrigger value="profile" className="gap-1.5 text-xs sm:text-sm">
+                <User className="h-3.5 w-3.5" />Profile
               </TabsTrigger>
-              <TabsTrigger value="security" className="flex items-center gap-2">
-                <Key className="h-4 w-4" />
-                Security
+              <TabsTrigger value="security" className="gap-1.5 text-xs sm:text-sm">
+                <Key className="h-3.5 w-3.5" />Security
               </TabsTrigger>
-              <TabsTrigger value="account" className="flex items-center gap-2">
-                <Mail className="h-4 w-4" />
-                Account
+              <TabsTrigger value="account" className="gap-1.5 text-xs sm:text-sm">
+                <Mail className="h-3.5 w-3.5" />Email
               </TabsTrigger>
             </TabsList>
 
-            {/* Profile Tab */}
-            <TabsContent value="profile">
+            <TabsContent value="profile" className="space-y-4">
+              {/* Phone verification card — once per account */}
+              <Card className={isPhoneVerified ? 'border-emerald-500/30' : 'border-amber-500/30'}>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Phone className="h-4 w-4" />
+                    Phone number
+                  </CardTitle>
+                  <CardDescription>
+                    {isPhoneVerified
+                      ? 'Verified once for your account. Listings use this number.'
+                      : 'Verify once — then publish listings without repeating OTP.'}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="text-sm">
+                    <span className="text-muted-foreground">Current: </span>
+                    <span className="font-medium">{profileData.phone || 'Not set'}</span>
+                  </div>
+                  {isPhoneVerified ? (
+                    <Badge className="bg-emerald-600 text-white border-0 w-fit">
+                      <CheckCircle className="h-3 w-3 mr-1" />Verified
+                    </Badge>
+                  ) : (
+                    <Button size="sm" onClick={() => setPhoneDialogOpen(true)} className="w-fit">
+                      Verify phone
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+
               <Card>
                 <form onSubmit={handleProfileUpdate}>
                   <CardHeader>
-                    <CardTitle>Profile Information</CardTitle>
-                    <CardDescription>
-                      Update your personal information
-                    </CardDescription>
+                    <CardTitle className="text-base">Personal details</CardTitle>
+                    <CardDescription>Name and contact number on your account</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     {error && (
@@ -426,74 +383,58 @@ export default function ProfilePage() {
                       </Alert>
                     )}
                     {success && (
-                      <Alert className="bg-green-50 border-green-200">
-                        <AlertDescription className="text-green-800">
+                      <Alert className="border-emerald-500/30 bg-emerald-500/10">
+                        <AlertDescription className="text-emerald-800 dark:text-emerald-300">
                           {success}
                         </AlertDescription>
                       </Alert>
                     )}
-
                     <div className="space-y-2">
-                      <Label htmlFor="fullName">Full Name</Label>
+                      <Label htmlFor="fullName">Full name</Label>
                       <Input
                         id="fullName"
-                        placeholder="Your full name"
                         value={profileData.fullName}
-                        onChange={(e) =>
-                          setProfileData({ ...profileData, fullName: e.target.value })
-                        }
+                        onChange={(e) => setProfileData({ ...profileData, fullName: e.target.value })}
                       />
                     </div>
-
                     <div className="space-y-2">
-                      <Label htmlFor="phone">Phone Number</Label>
+                      <Label htmlFor="phone">Phone</Label>
                       <Input
                         id="phone"
                         type="tel"
                         placeholder="+268 7600 0000"
                         value={profileData.phone}
-                        onChange={(e) =>
-                          setProfileData({ ...profileData, phone: e.target.value })
-                        }
+                        onChange={(e) => setProfileData({ ...profileData, phone: e.target.value })}
                       />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Email</Label>
-                      <p className="text-gray-600">{user.email}</p>
-                      <p className="text-sm text-gray-500">
-                        To change your email, go to the Account tab
+                      <p className="text-xs text-muted-foreground">
+                        Changing your number requires a new verification.
                       </p>
+                    </div>
+                    <div className="space-y-1">
+                      <Label>Email</Label>
+                      <p className="text-sm text-muted-foreground">{user.email}</p>
                     </div>
                   </CardContent>
                   <CardFooter>
                     <Button type="submit" disabled={profileLoading}>
                       {profileLoading ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Saving...
-                        </>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       ) : (
-                        <>
-                          <Save className="mr-2 h-4 w-4" />
-                          Save Changes
-                        </>
+                        <Save className="mr-2 h-4 w-4" />
                       )}
+                      Save
                     </Button>
                   </CardFooter>
                 </form>
               </Card>
             </TabsContent>
 
-            {/* Security Tab */}
             <TabsContent value="security">
               <Card>
                 <form onSubmit={handlePasswordUpdate}>
                   <CardHeader>
-                    <CardTitle>Change Password</CardTitle>
-                    <CardDescription>
-                      Update your password. You must enter your current password to verify your identity.
-                    </CardDescription>
+                    <CardTitle className="text-base">Password</CardTitle>
+                    <CardDescription>Confirm your current password to change it</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     {error && (
@@ -502,19 +443,15 @@ export default function ProfilePage() {
                       </Alert>
                     )}
                     {success && (
-                      <Alert className="bg-green-50 border-green-200">
-                        <AlertDescription className="text-green-800">
-                          {success}
-                        </AlertDescription>
+                      <Alert className="border-emerald-500/30 bg-emerald-500/10">
+                        <AlertDescription className="text-emerald-800 dark:text-emerald-300">{success}</AlertDescription>
                       </Alert>
                     )}
-
                     <div className="space-y-2">
-                      <Label htmlFor="currentPassword">Current Password</Label>
+                      <Label htmlFor="currentPassword">Current password</Label>
                       <Input
                         id="currentPassword"
                         type="password"
-                        placeholder="Enter your current password"
                         value={passwordData.currentPassword}
                         onChange={(e) =>
                           setPasswordData({ ...passwordData, currentPassword: e.target.value })
@@ -522,13 +459,11 @@ export default function ProfilePage() {
                         required
                       />
                     </div>
-
                     <div className="space-y-2">
-                      <Label htmlFor="newPassword">New Password</Label>
+                      <Label htmlFor="newPassword">New password</Label>
                       <Input
                         id="newPassword"
                         type="password"
-                        placeholder="Enter new password (min 6 characters)"
                         value={passwordData.newPassword}
                         onChange={(e) =>
                           setPasswordData({ ...passwordData, newPassword: e.target.value })
@@ -537,13 +472,11 @@ export default function ProfilePage() {
                         minLength={6}
                       />
                     </div>
-
                     <div className="space-y-2">
-                      <Label htmlFor="confirmPassword">Confirm New Password</Label>
+                      <Label htmlFor="confirmPassword">Confirm new password</Label>
                       <Input
                         id="confirmPassword"
                         type="password"
-                        placeholder="Confirm your new password"
                         value={passwordData.confirmPassword}
                         onChange={(e) =>
                           setPasswordData({ ...passwordData, confirmPassword: e.target.value })
@@ -552,43 +485,23 @@ export default function ProfilePage() {
                         minLength={6}
                       />
                     </div>
-
-                    <Alert className="bg-blue-50 border-blue-200">
-                      <AlertDescription className="text-blue-800 text-sm">
-                        ⚠️ For security, you must verify your current password
-                        before changing it. Your current password will be verified
-                        before the update is applied.
-                      </AlertDescription>
-                    </Alert>
                   </CardContent>
                   <CardFooter>
                     <Button type="submit" disabled={loading}>
-                      {loading ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Updating...
-                        </>
-                      ) : (
-                        <>
-                          <Key className="mr-2 h-4 w-4" />
-                          Update Password
-                        </>
-                      )}
+                      {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Key className="mr-2 h-4 w-4" />}
+                      Update password
                     </Button>
                   </CardFooter>
                 </form>
               </Card>
             </TabsContent>
 
-            {/* Account Tab */}
             <TabsContent value="account">
               <Card>
                 <form onSubmit={handleEmailUpdate}>
                   <CardHeader>
-                    <CardTitle>Email Address</CardTitle>
-                    <CardDescription>
-                      Change your email address. You'll need to verify your new email.
-                    </CardDescription>
+                    <CardTitle className="text-base">Email</CardTitle>
+                    <CardDescription>You’ll confirm the new address by email</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     {error && (
@@ -597,38 +510,29 @@ export default function ProfilePage() {
                       </Alert>
                     )}
                     {success && (
-                      <Alert className="bg-green-50 border-green-200">
-                        <AlertDescription className="text-green-800">
-                          {success}
-                        </AlertDescription>
+                      <Alert className="border-emerald-500/30 bg-emerald-500/10">
+                        <AlertDescription className="text-emerald-800 dark:text-emerald-300">{success}</AlertDescription>
                       </Alert>
                     )}
-
-                    <div className="space-y-2">
-                      <Label>Current Email</Label>
-                      <p className="text-gray-600">{user.email}</p>
+                    <div className="space-y-1">
+                      <Label>Current</Label>
+                      <p className="text-sm text-muted-foreground">{user.email}</p>
                     </div>
-
                     <div className="space-y-2">
-                      <Label htmlFor="newEmail">New Email</Label>
+                      <Label htmlFor="newEmail">New email</Label>
                       <Input
                         id="newEmail"
                         type="email"
-                        placeholder="Enter your new email address"
                         value={emailData.newEmail}
-                        onChange={(e) =>
-                          setEmailData({ ...emailData, newEmail: e.target.value })
-                        }
+                        onChange={(e) => setEmailData({ ...emailData, newEmail: e.target.value })}
                         required
                       />
                     </div>
-
                     <div className="space-y-2">
-                      <Label htmlFor="emailPassword">Current Password</Label>
+                      <Label htmlFor="emailPassword">Current password</Label>
                       <Input
                         id="emailPassword"
                         type="password"
-                        placeholder="Enter your current password to verify"
                         value={emailData.currentPassword}
                         onChange={(e) =>
                           setEmailData({ ...emailData, currentPassword: e.target.value })
@@ -636,27 +540,11 @@ export default function ProfilePage() {
                         required
                       />
                     </div>
-
-                    <Alert className="bg-yellow-50 border-yellow-200">
-                      <AlertDescription className="text-yellow-800 text-sm">
-                        ⚠️ Changing your email will log you out. You'll need to
-                        verify your new email address before you can log in again.
-                      </AlertDescription>
-                    </Alert>
                   </CardContent>
                   <CardFooter>
                     <Button type="submit" disabled={loading}>
-                      {loading ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Updating...
-                        </>
-                      ) : (
-                        <>
-                          <Mail className="mr-2 h-4 w-4" />
-                          Update Email
-                        </>
-                      )}
+                      {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Mail className="mr-2 h-4 w-4" />}
+                      Update email
                     </Button>
                   </CardFooter>
                 </form>
@@ -666,43 +554,47 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* Re-authentication Dialog */}
+      <PhoneVerifyDialog
+        open={phoneDialogOpen}
+        onOpenChange={setPhoneDialogOpen}
+        defaultPhone={profileData.phone}
+        onVerified={async () => {
+          await refreshPhone();
+          await refreshUser();
+          toast.success('Phone verified for your account');
+        }}
+      />
+
       <Dialog open={showReAuthDialog} onOpenChange={setShowReAuthDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Re-authentication Required</DialogTitle>
-            <DialogDescription>
-              For security, please enter your current password to confirm this action.
-            </DialogDescription>
+            <DialogTitle>Confirm it’s you</DialogTitle>
+            <DialogDescription>Enter your current password to continue.</DialogDescription>
           </DialogHeader>
-          <div className="py-4">
-            <Label htmlFor="reauth-password">Current Password</Label>
+          <div className="py-2">
+            <Label htmlFor="reauth-password">Password</Label>
             <Input
               id="reauth-password"
               type="password"
-              placeholder="Enter your current password"
               value={reauthPassword}
               onChange={(e) => setReauthPassword(e.target.value)}
               className="mt-2"
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => {
-              setShowReAuthDialog(false);
-              setReauthPassword('');
-              setPendingAction(null);
-            }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowReAuthDialog(false);
+                setReauthPassword('');
+                setPendingAction(null);
+              }}
+            >
               Cancel
             </Button>
             <Button onClick={handleReAuth} disabled={reauthLoading || !reauthPassword}>
-              {reauthLoading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Verifying...
-                </>
-              ) : (
-                'Confirm'
-              )}
+              {reauthLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Confirm
             </Button>
           </DialogFooter>
         </DialogContent>
