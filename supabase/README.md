@@ -1,37 +1,49 @@
-# Supabase migrations — Ekhaya
+# Supabase — Ekhaya
 
-## CRITICAL (signup broken without this)
+## If the database was wiped (empty project)
 
-If signup shows **"Database error saving new user"**, run this first in
-**Supabase → SQL Editor**:
+Run **one file** in **Supabase → SQL Editor**:
 
-`migrations/20260726_fix_signup_user_types.sql`
+`migrations/20260728_full_schema_bootstrap.sql`
 
-That widens `profiles.user_type` and fixes the `handle_new_user` trigger so
-`seeker` / `broker` / `agent` are accepted.
+That creates every table, index, RLS policy, signup trigger, and the `property-photos` storage bucket.
 
-## How to apply any migration
+Then:
 
-### Option A — Supabase Dashboard (SQL Editor)
-1. Open your project → **SQL Editor**
-2. Paste the file contents
-3. Run
+1. Sign up once through the app (profile is created by trigger).
+2. Promote yourself to admin:
 
-### Option B — Supabase CLI
-```bash
-supabase db push
+```sql
+UPDATE public.profiles
+SET user_type = 'admin'
+WHERE email = 'your@email.com';
 ```
 
-## Migration order
+3. Confirm **Storage → property-photos** exists and is public.
 
-1. `20260725_ekhaya_schema_convergence.sql` — tenure, areas, reports, phone_verified_at
-2. `20260725_phone_otps.sql` — OTP table
-3. `20260726_fix_signup_user_types.sql` — **signup fix (roles + trigger)**
+## Incremental migrations (already applied / optional)
 
-## What each does
+If you still have an older DB and only need deltas, the older files remain:
 
 | File | Purpose |
 |------|--------|
-| schema convergence | tenure, areas, reports, phone_verified_at |
-| phone_otps | SMS OTP storage |
-| fix_signup_user_types | Allow seeker/broker/agent; safe handle_new_user |
+| `20260725_ekhaya_schema_convergence.sql` | tenure, areas, reports |
+| `20260725_phone_otps.sql` | OTP table |
+| `20260726_fix_signup_user_types.sql` | roles + trigger |
+| `20260726_landlord_first_class_role.sql` | landlord role |
+| `20260726_listing_category_model.sql` | land/residential fields |
+| `20260726_commercial_fields.sql` | commercial fields |
+| **`20260728_full_schema_bootstrap.sql`** | **full recreate from zero** |
+
+## Tables created by bootstrap
+
+- `profiles`
+- `properties`
+- `property_photos`
+- `areas`
+- `reports`
+- `phone_otps`
+- `saved_properties`
+- `search_alerts`
+- `admin_activity_log`
+- storage bucket `property-photos`
