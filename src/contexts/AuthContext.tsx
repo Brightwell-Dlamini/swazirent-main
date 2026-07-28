@@ -15,14 +15,12 @@ import {
   canPostListings,
 } from '@/types/user';
 
-// Re-export for convenience
 export type { UserType };
 export { isValidUserType, normalizeUserType, getDefaultRedirect, getDefaultUserType, canPostListings };
 
-// Extended User type with proper metadata typing
 export interface ExtendedUser extends User {
   user_metadata: {
-    user_type?: string; // may still contain legacy values
+    user_type?: string;
     full_name?: string;
     phone?: string;
     avatar_url?: string;
@@ -60,7 +58,6 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Cache keys
 const AUTH_CACHE_KEY = 'ekhaya_auth_cache';
 const PROFILE_CACHE_KEY = 'ekhaya_profile_cache';
 
@@ -88,7 +85,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isInitialized, setIsInitialized] = useState(false);
   const router = useRouter();
 
-  // Refs to prevent re-fetches and state updates
   const isMountedRef = useRef(true);
   const initialLoadDoneRef = useRef(false);
   const profileFetchInProgressRef = useRef(false);
@@ -102,22 +98,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isVerified = profile?.isVerified || false;
   const canPost = canPostListings(userType);
 
-  // === CACHE HELPERS ===
-
   const getCachedUser = useCallback((): ExtendedUser | null => {
     try {
       const cached = localStorage.getItem(AUTH_CACHE_KEY);
       if (!cached) return null;
-
       const data: AuthCache = JSON.parse(cached);
-      const now = Date.now();
-
-      // Cache for 5 minutes
-      if (now - data.timestamp > 5 * 60 * 1000) {
+      if (Date.now() - data.timestamp > 5 * 60 * 1000) {
         localStorage.removeItem(AUTH_CACHE_KEY);
         return null;
       }
-
       if (data.user) {
         return {
           id: data.user.id,
@@ -138,15 +127,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const cached = localStorage.getItem(PROFILE_CACHE_KEY);
       if (!cached) return null;
-
       const data: ProfileCache = JSON.parse(cached);
-      const now = Date.now();
-
-      if (now - data.timestamp > 5 * 60 * 1000) {
+      if (Date.now() - data.timestamp > 5 * 60 * 1000) {
         localStorage.removeItem(PROFILE_CACHE_KEY);
         return null;
       }
-
       return data;
     } catch {
       return null;
@@ -156,67 +141,88 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const cacheUser = useCallback((userData: ExtendedUser | null) => {
     try {
       if (userData) {
-        const cacheData: AuthCache = {
-          user: {
-            id: userData.id,
-            email: userData.email || '',
-            user_metadata: userData.user_metadata || {},
-          },
-          timestamp: Date.now(),
-        };
-        localStorage.setItem(AUTH_CACHE_KEY, JSON.stringify(cacheData));
+        localStorage.setItem(
+          AUTH_CACHE_KEY,
+          JSON.stringify({
+            user: {
+              id: userData.id,
+              email: userData.email || '',
+              user_metadata: userData.user_metadata || {},
+            },
+            timestamp: Date.now(),
+          } satisfies AuthCache)
+        );
       } else {
         localStorage.removeItem(AUTH_CACHE_KEY);
       }
     } catch {
-      // Silently fail
+      /* ignore */
     }
   }, []);
 
   const cacheProfile = useCallback((profileData: UserProfile | null) => {
     try {
       if (profileData) {
-        const cacheData: ProfileCache = {
-          ...profileData,
-          timestamp: Date.now(),
-        };
-        localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(cacheData));
+        localStorage.setItem(
+          PROFILE_CACHE_KEY,
+          JSON.stringify({ ...profileData, timestamp: Date.now() } satisfies ProfileCache)
+        );
       } else {
         localStorage.removeItem(PROFILE_CACHE_KEY);
       }
     } catch {
-      // Silently fail
+      /* ignore */
     }
   }, []);
-
-  // === AUTH FUNCTIONS ===
 
   const createUserProfile = useCallback(
     async (
       userId: string,
       email: string,
-      userType: UserType = 'seeker',
+      role: UserType = 'seeker',
       fullName?: string,
       phone?: string
     ): Promise<UserProfile | null> => {
+      const canonical = normalizeUserType(role);
+      const payload = {
+        id: userId,
+        email,
+        full_name: fullName || null,
+        phone: phone || null,
+        user_type: canonical,
+        is_verified: false,
+        updated_at: new Date().toISOString(),
+      };
+
       try {
+        // Force role on existing row (trigger may have inserted seeker first)
+        const { data: updated, error: updateError } = await supabase
+          .from('profiles')
+          .update({
+            email: payload.email,
+            full_name: payload.full_name,
+            phone: payload.phone,
+            user_type: canonical,
+            updated_at: payload.updated_at,
+          })
+          .eq('id', userId)
+          .select('user_type, is_verified, full_name, phone')
+          .maybeSingle();
+
+        if (!updateError && updated) {
+          return {
+            userType: normalizeUserType(updated.user_type),
+            isVerified: !!updated.is_verified,
+            fullName: updated.full_name ?? undefined,
+            phone: updated.phone ?? undefined,
+          };
+        }
+
         const { data, error } = await supabase
           .from('profiles')
           .upsert(
-            {
-              id: userId,
-              email,
-              full_name: fullName || null,
-              phone: phone || null,
-              user_type: userType, // store canonical value
-              is_verified: false,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            },
-            {
-              onConflict: 'id',
-              ignoreDuplicates: false,
-            }
+            { ...payload, created_at: new Date().toISOString() },
+            { onConflict: 'id', ignoreDuplicates: false }
           )
           .select('user_type, is_verified, full_name, phone')
           .maybeSingle();
@@ -229,12 +235,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (data) {
           return {
             userType: normalizeUserType(data.user_type),
-            isVerified: data.is_verified || false,
-            fullName: data.full_name,
-            phone: data.phone,
+            isVerified: !!data.is_verified,
+            fullName: data.full_name ?? undefined,
+            phone: data.phone ?? undefined,
           };
         }
-
         return null;
       } catch (error) {
         console.error('Error in createUserProfile:', error);
@@ -248,7 +253,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (userId: string, forceRefresh = false): Promise<UserProfile | null> => {
       if (!userId) return null;
 
-      // Check cache first (unless forced refresh)
       if (!forceRefresh) {
         const cached = getCachedProfile();
         if (cached) {
@@ -261,9 +265,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      // Prevent concurrent fetches
       if (profileFetchInProgressRef.current && !forceRefresh) {
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise((resolve) => setTimeout(resolve, 100));
         const cached = getCachedProfile();
         if (cached) {
           return {
@@ -293,9 +296,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (data) {
           const profileData = {
             userType: normalizeUserType(data.user_type),
-            isVerified: data.is_verified || false,
-            fullName: data.full_name,
-            phone: data.phone,
+            isVerified: !!data.is_verified,
+            fullName: data.full_name ?? undefined,
+            phone: data.phone ?? undefined,
           };
           cacheProfile(profileData);
           return profileData;
@@ -312,23 +315,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [getCachedProfile, cacheProfile]
   );
 
-  // === MAIN AUTH FUNCTIONS ===
-
   const refreshUserType = useCallback(async () => {
     if (!user) return;
-
     try {
       const userProfile = await fetchUserProfile(user.id, true);
       if (isMountedRef.current) {
-        const currentProfileStr = JSON.stringify(profileRef.current);
-        const newProfileStr = JSON.stringify(userProfile);
-        if (currentProfileStr !== newProfileStr) {
-          setProfile(userProfile);
-          profileRef.current = userProfile;
-          if (userProfile) {
-            cacheProfile(userProfile);
-          }
-        }
+        setProfile(userProfile);
+        profileRef.current = userProfile;
+        if (userProfile) cacheProfile(userProfile);
       }
     } catch (error) {
       console.error('Error refreshing user type:', error);
@@ -337,35 +331,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshUser = useCallback(async () => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       const currentUser = session?.user ?? null;
 
       if (currentUser) {
-        if (!userRef.current || userRef.current.id !== currentUser.id) {
-          setUser(currentUser as ExtendedUser);
-          userRef.current = currentUser as ExtendedUser;
-          cacheUser(currentUser as ExtendedUser);
+        setUser(currentUser as ExtendedUser);
+        userRef.current = currentUser as ExtendedUser;
+        cacheUser(currentUser as ExtendedUser);
 
-          const userProfile = await fetchUserProfile(currentUser.id, true);
-          if (isMountedRef.current) {
-            if (JSON.stringify(profileRef.current) !== JSON.stringify(userProfile)) {
-              setProfile(userProfile);
-              profileRef.current = userProfile;
-              if (userProfile) {
-                cacheProfile(userProfile);
-              }
-            }
-          }
+        const userProfile = await fetchUserProfile(currentUser.id, true);
+        if (isMountedRef.current) {
+          setProfile(userProfile);
+          profileRef.current = userProfile;
+          if (userProfile) cacheProfile(userProfile);
         }
-      } else {
-        if (userRef.current !== null) {
-          setUser(null);
-          userRef.current = null;
-          setProfile(null);
-          profileRef.current = null;
-          cacheUser(null);
-          cacheProfile(null);
-        }
+      } else if (userRef.current !== null) {
+        setUser(null);
+        userRef.current = null;
+        setProfile(null);
+        profileRef.current = null;
+        cacheUser(null);
+        cacheProfile(null);
       }
     } catch (error) {
       console.error('Error refreshing user:', error);
@@ -373,18 +361,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [fetchUserProfile, cacheUser, cacheProfile]);
 
   const redirectToDashboard = useCallback(() => {
-    const type = profile?.userType || 'seeker';
-    const path = getDefaultRedirect(type);
-    router.push(path);
+    router.push(getDefaultRedirect(profile?.userType || 'seeker'));
   }, [profile, router]);
 
   const signIn = useCallback(
     async (email: string, password: string) => {
       try {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
         if (error) {
           toast.error(error.message);
@@ -398,51 +381,53 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           userRef.current = data.user as ExtendedUser;
           cacheUser(data.user as ExtendedUser);
 
+          // Always clear stale profile cache on login
+          localStorage.removeItem(PROFILE_CACHE_KEY);
+
           let userProfile = await fetchUserProfile(data.user.id, true);
+          const metaType = normalizeUserType(data.user.user_metadata?.user_type);
 
           if (!userProfile) {
-            const rawType = data.user.user_metadata?.user_type;
-            const canonical = normalizeUserType(rawType);
             userProfile = await createUserProfile(
               data.user.id,
               data.user.email!,
-              canonical,
+              metaType,
               data.user.user_metadata?.full_name,
               data.user.user_metadata?.phone
             );
+          } else if (
+            userProfile.userType === 'seeker' &&
+            metaType !== 'seeker' &&
+            isValidUserType(metaType)
+          ) {
+            // Heal wrong seeker default if auth metadata still has the chosen role
+            const healed = await createUserProfile(
+              data.user.id,
+              data.user.email!,
+              metaType,
+              data.user.user_metadata?.full_name || userProfile.fullName,
+              data.user.user_metadata?.phone || userProfile.phone
+            );
+            if (healed) userProfile = healed;
+          }
 
-            if (!userProfile) {
-              userProfile = {
-                userType: 'seeker',
-                isVerified: false,
-                fullName: data.user.user_metadata?.full_name || data.user.email?.split('@')[0] || 'User',
-                phone: data.user.user_metadata?.phone || null,
-              };
-
-              try {
-                await supabase
-                  .from('profiles')
-                  .upsert({
-                    id: data.user.id,
-                    email: data.user.email!,
-                    full_name: userProfile.fullName,
-                    phone: userProfile.phone,
-                    user_type: 'seeker',
-                    is_verified: false,
-                    updated_at: new Date().toISOString(),
-                  });
-              } catch (dbError) {
-                console.error('Failed to save default profile:', dbError);
-              }
-            }
+          if (!userProfile) {
+            userProfile = {
+              userType: metaType,
+              isVerified: false,
+              fullName:
+                data.user.user_metadata?.full_name ||
+                data.user.email?.split('@')[0] ||
+                'User',
+              phone: data.user.user_metadata?.phone,
+            };
           }
 
           setProfile(userProfile);
           profileRef.current = userProfile;
           cacheProfile(userProfile);
 
-          const redirectPath = getDefaultRedirect(userProfile.userType);
-          router.push(redirectPath);
+          router.push(getDefaultRedirect(userProfile.userType));
         }
 
         return { error: null };
@@ -456,14 +441,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signUp = useCallback(
-    async (email: string, password: string, userType: UserType, fullName?: string, phone?: string) => {
+    async (
+      email: string,
+      password: string,
+      role: UserType,
+      fullName?: string,
+      phone?: string
+    ) => {
       try {
+        const canonical = normalizeUserType(role);
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
             data: {
-              user_type: userType, // store canonical value from day one
+              user_type: canonical,
               full_name: fullName,
               phone: phone,
             },
@@ -477,13 +469,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (data.user) {
-          const profile = await createUserProfile(data.user.id, email, userType, fullName, phone);
+          localStorage.removeItem(PROFILE_CACHE_KEY);
 
-          if (profile) {
-            setProfile(profile);
-            profileRef.current = profile;
-            cacheProfile(profile);
-          }
+          // Trigger may insert first; then we force the chosen role when session exists
+          const profileRow = await createUserProfile(
+            data.user.id,
+            email,
+            canonical,
+            fullName,
+            phone
+          );
+
+          const effective: UserProfile = profileRow || {
+            userType: canonical,
+            isVerified: false,
+            fullName,
+            phone,
+          };
+
+          setProfile(effective);
+          profileRef.current = effective;
+          cacheProfile(effective);
 
           setUser(data.user as ExtendedUser);
           userRef.current = data.user as ExtendedUser;
@@ -491,11 +497,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
           if (!data.session) {
             toast.success('Account created! Please check your email to verify your account.');
-            router.push('/auth/verify-email');
+            router.push('/auth/login');
           } else {
             toast.success('Account created successfully!');
-            const redirectPath = getDefaultRedirect(userType);
-            router.push(redirectPath);
+            router.push(getDefaultRedirect(canonical));
           }
         }
 
@@ -528,19 +533,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [router, cacheUser, cacheProfile]);
 
-  // === OPTIMIZED SESSION CHECK - Only on user interaction ===
   const checkSessionOnUserInteraction = useCallback(async () => {
     if (document.visibilityState === 'visible') {
       const now = Date.now();
-      if (now - lastUserCheckRef.current < 5 * 60 * 1000) {
-        return;
-      }
+      if (now - lastUserCheckRef.current < 5 * 60 * 1000) return;
       lastUserCheckRef.current = now;
       await refreshUser();
     }
   }, [refreshUser]);
-
-  // === INITIALIZATION - ONLY RUNS ONCE ===
 
   useEffect(() => {
     if (initialLoadDoneRef.current) return;
@@ -549,54 +549,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const initializeAuth = async () => {
       setIsLoading(true);
-
       try {
-        // 1. Try to restore from cache FIRST - instant display
         const cachedUser = getCachedUser();
         const cachedProfile = getCachedProfile();
 
         if (cachedUser && cachedProfile) {
           setUser(cachedUser);
           userRef.current = cachedUser;
-          setProfile({
-            userType: cachedProfile.userType,
-            isVerified: cachedProfile.isVerified,
-            fullName: cachedProfile.fullName,
-            phone: cachedProfile.phone,
-          });
-          profileRef.current = {
+          const p = {
             userType: cachedProfile.userType,
             isVerified: cachedProfile.isVerified,
             fullName: cachedProfile.fullName,
             phone: cachedProfile.phone,
           };
+          setProfile(p);
+          profileRef.current = p;
           setIsLoading(false);
           setIsInitialized(true);
           isInitializedRef.current = true;
         }
 
-        // 2. Verify session with Supabase (silently in background)
-        const { data: { session } } = await supabase.auth.getSession();
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
         const currentUser = session?.user ?? null;
 
         if (currentUser) {
-          const needUpdate = !cachedUser || cachedUser.id !== currentUser.id;
+          setUser(currentUser as ExtendedUser);
+          userRef.current = currentUser as ExtendedUser;
+          cacheUser(currentUser as ExtendedUser);
 
-          if (needUpdate) {
-            setUser(currentUser as ExtendedUser);
-            userRef.current = currentUser as ExtendedUser;
-            cacheUser(currentUser as ExtendedUser);
-
-            const userProfile = await fetchUserProfile(currentUser.id, true);
-            if (isMountedRef.current) {
-              if (JSON.stringify(profileRef.current) !== JSON.stringify(userProfile)) {
-                setProfile(userProfile);
-                profileRef.current = userProfile;
-                if (userProfile) {
-                  cacheProfile(userProfile);
-                }
-              }
-            }
+          const userProfile = await fetchUserProfile(currentUser.id, true);
+          if (isMountedRef.current) {
+            setProfile(userProfile);
+            profileRef.current = userProfile;
+            if (userProfile) cacheProfile(userProfile);
           }
         } else if (cachedUser) {
           setUser(null);
@@ -608,12 +595,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       } catch (error) {
         console.error('Error initializing auth:', error);
-        if (!getCachedUser()) {
-          setUser(null);
-          userRef.current = null;
-          setProfile(null);
-          profileRef.current = null;
-        }
       } finally {
         if (isMountedRef.current) {
           setIsLoading(false);
@@ -626,64 +607,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     initializeAuth();
 
     document.addEventListener('visibilitychange', checkSessionOnUserInteraction);
-
-    const handleUserActivity = () => {
-      checkSessionOnUserInteraction();
-    };
-
-    document.addEventListener('click', handleUserActivity);
-    document.addEventListener('scroll', handleUserActivity);
-    document.addEventListener('keypress', handleUserActivity);
-
+    document.addEventListener('click', checkSessionOnUserInteraction);
+    document.addEventListener('scroll', checkSessionOnUserInteraction);
     window.addEventListener('online', checkSessionOnUserInteraction);
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') {
-          const currentUser = session?.user ?? null;
-
-          if (currentUser) {
-            setUser(currentUser as ExtendedUser);
-            userRef.current = currentUser as ExtendedUser;
-            cacheUser(currentUser as ExtendedUser);
-
-            const userProfile = await fetchUserProfile(currentUser.id, true);
-            if (isMountedRef.current) {
-              if (JSON.stringify(profileRef.current) !== JSON.stringify(userProfile)) {
-                setProfile(userProfile);
-                profileRef.current = userProfile;
-                if (userProfile) {
-                  cacheProfile(userProfile);
-                }
-              }
-            }
-          } else {
-            setUser(null);
-            userRef.current = null;
-            setProfile(null);
-            profileRef.current = null;
-            cacheUser(null);
-            cacheProfile(null);
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') {
+        const currentUser = session?.user ?? null;
+        if (currentUser) {
+          setUser(currentUser as ExtendedUser);
+          userRef.current = currentUser as ExtendedUser;
+          cacheUser(currentUser as ExtendedUser);
+          const userProfile = await fetchUserProfile(currentUser.id, true);
+          if (isMountedRef.current) {
+            setProfile(userProfile);
+            profileRef.current = userProfile;
+            if (userProfile) cacheProfile(userProfile);
           }
+        } else {
+          setUser(null);
+          userRef.current = null;
+          setProfile(null);
+          profileRef.current = null;
+          cacheUser(null);
+          cacheProfile(null);
         }
       }
-    );
+    });
 
     return () => {
-      if (sessionCheckIntervalRef.current) {
-        clearInterval(sessionCheckIntervalRef.current);
-      }
+      if (sessionCheckIntervalRef.current) clearInterval(sessionCheckIntervalRef.current);
       subscription.unsubscribe();
       document.removeEventListener('visibilitychange', checkSessionOnUserInteraction);
-      document.removeEventListener('click', handleUserActivity);
-      document.removeEventListener('scroll', handleUserActivity);
-      document.removeEventListener('keypress', handleUserActivity);
+      document.removeEventListener('click', checkSessionOnUserInteraction);
+      document.removeEventListener('scroll', checkSessionOnUserInteraction);
       window.removeEventListener('online', checkSessionOnUserInteraction);
       isMountedRef.current = false;
     };
-  }, []); // Empty dependency array - ONLY RUNS ONCE
+  }, []);
 
-  // Memoize the value to prevent unnecessary re-renders
   const value = useMemo(
     () => ({
       user,
