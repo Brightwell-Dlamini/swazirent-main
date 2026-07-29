@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
+import { hideUserListings } from '@/lib/adminModeration';
 import {
   ASSIGNABLE_ROLES,
   ADMIN_USER_TYPE_FILTERS,
@@ -241,8 +242,25 @@ export default function AdminDashboardView() {
         : { is_verified: false, verification_level: 'rejected', verified_by: user?.id, verified_at: now, updated_at: now };
       const { error } = await supabase.from('profiles').update(updateData).eq('id', userId);
       if (error) throw error;
-      await logAdminAction(action === 'verify' ? 'user_verified' : 'user_rejected', 'user', userId, { action });
-      toast.success(`Account ${action === 'verify' ? 'verified' : 'rejected'}`);
+
+      let hiddenCount = 0;
+      if (action === 'reject') {
+        const listingResult = await hideUserListings(userId);
+        if (listingResult.error) console.warn('hide listings after revoke:', listingResult.error);
+        hiddenCount = listingResult.hiddenCount;
+      }
+
+      await logAdminAction(action === 'verify' ? 'user_verified' : 'user_rejected', 'user', userId, {
+        action,
+        listings_hidden: hiddenCount,
+      });
+      toast.success(
+        action === 'verify'
+          ? 'Account verified'
+          : hiddenCount > 0
+            ? `Verification revoked · ${hiddenCount} listing(s) hidden`
+            : 'Verification revoked'
+      );
       setIsVerifyDialogOpen(false); setSelectedUser(null); setVerifyAction(null);
       await fetchData();
     } catch (e: any) { toast.error(e.message || 'Verification failed'); }
@@ -256,8 +274,19 @@ export default function AdminDashboardView() {
         is_banned: true, ban_reason: banReason || 'Banned by admin', updated_at: new Date().toISOString(),
       }).eq('id', userId);
       if (error) throw error;
-      await logAdminAction('user_banned', 'user', userId, { reason: banReason });
-      toast.success('User banned');
+
+      const listingResult = await hideUserListings(userId);
+      if (listingResult.error) console.warn('hide listings after ban:', listingResult.error);
+
+      await logAdminAction('user_banned', 'user', userId, {
+        reason: banReason,
+        listings_hidden: listingResult.hiddenCount,
+      });
+      toast.success(
+        listingResult.hiddenCount > 0
+          ? `User banned · ${listingResult.hiddenCount} listing(s) hidden`
+          : 'User banned'
+      );
       setIsBanDialogOpen(false); setBanReason(''); setSelectedUser(null);
       await fetchData();
     } catch (e: any) { toast.error(e.message || 'Ban failed'); }
@@ -272,7 +301,7 @@ export default function AdminDashboardView() {
       }).eq('id', userId);
       if (error) throw error;
       await logAdminAction('user_unbanned', 'user', userId);
-      toast.success('User unbanned');
+      toast.success('User unbanned — listings stay hidden until you or the owner reactivate them');
       await fetchData();
     } catch (e: any) { toast.error(e.message || 'Unban failed'); }
     finally { setIsProcessing(false); }
@@ -281,6 +310,8 @@ export default function AdminDashboardView() {
   const handleDeleteUser = async (userId: string) => {
     setIsProcessing(true);
     try {
+      // Hide inventory first so nothing stays public if delete is partial
+      await hideUserListings(userId);
       const { error } = await supabase.from('profiles').delete().eq('id', userId);
       if (error) throw error;
       await logAdminAction('user_deleted', 'user', userId);
@@ -522,6 +553,7 @@ export default function AdminDashboardView() {
               <SelectItem value="pending">Pending</SelectItem>
               <SelectItem value="active">Active</SelectItem>
               <SelectItem value="paused">Paused</SelectItem>
+              <SelectItem value="hidden">Hidden</SelectItem>
               <SelectItem value="taken">Taken</SelectItem>
               <SelectItem value="rejected">Rejected</SelectItem>
               <SelectItem value="featured">Featured</SelectItem>
@@ -671,9 +703,14 @@ export default function AdminDashboardView() {
       <Dialog open={isVerifyDialogOpen} onOpenChange={setIsVerifyDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{verifyAction === 'verify' ? 'Verify poster' : 'Reject verification'}</DialogTitle>
+            <DialogTitle>{verifyAction === 'verify' ? 'Verify poster' : 'Reject / revoke verification'}</DialogTitle>
             <DialogDescription>
               {selectedUser?.full_name || selectedUser?.email} · {selectedUser && getUserTypeLabel(selectedUser.user_type as UserType)}
+              {verifyAction === 'reject' && (
+                <span className="block mt-2 text-amber-700 dark:text-amber-400">
+                  Their active/pending listings will be hidden from the public site.
+                </span>
+              )}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -685,7 +722,7 @@ export default function AdminDashboardView() {
               onClick={() => selectedUser && verifyAction && handleVerifyUser(selectedUser.id, verifyAction)}
             >
               {isProcessing && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-              {verifyAction === 'verify' ? 'Verify' : 'Reject'}
+              {verifyAction === 'verify' ? 'Verify' : 'Revoke & hide listings'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -695,13 +732,18 @@ export default function AdminDashboardView() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Ban user</DialogTitle>
-            <DialogDescription>{selectedUser?.full_name || selectedUser?.email} will lose access.</DialogDescription>
+            <DialogDescription>
+              {selectedUser?.full_name || selectedUser?.email} will lose access.
+              <span className="block mt-2 text-amber-700 dark:text-amber-400">
+                All their active/pending listings will be hidden automatically.
+              </span>
+            </DialogDescription>
           </DialogHeader>
           <Textarea placeholder="Reason (optional)" value={banReason} onChange={(e) => setBanReason(e.target.value)} />
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsBanDialogOpen(false)}>Cancel</Button>
             <Button variant="destructive" disabled={isProcessing} onClick={() => selectedUser && handleBanUser(selectedUser.id)}>
-              {isProcessing && <Loader2 className="h-4 w-4 animate-spin mr-2" />}Ban
+              {isProcessing && <Loader2 className="h-4 w-4 animate-spin mr-2" />}Ban & hide listings
             </Button>
           </DialogFooter>
         </DialogContent>
