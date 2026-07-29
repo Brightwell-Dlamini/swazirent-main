@@ -26,10 +26,12 @@ interface PropertyWithPhotos extends Property {
 const STATUS_TRANSITIONS: Record<string, string[]> = {
   draft: ['pending'],
   pending: ['active', 'rejected'],
-  active: ['rented', 'taken', 'pending'],
+  active: ['rented', 'taken', 'pending', 'paused', 'hidden'],
   rented: ['active'],
   taken: ['active'],
   rejected: ['pending'],
+  paused: ['active'],
+  hidden: ['active'],
 };
 
 const STATUS_CONFIG: Record<
@@ -42,13 +44,16 @@ const STATUS_CONFIG: Record<
   rented: { label: 'Rented', variant: 'outline' },
   taken: { label: 'Taken', variant: 'outline' },
   rejected: { label: 'Rejected', variant: 'destructive' },
+  paused: { label: 'Paused', variant: 'outline' },
+  hidden: { label: 'Hidden', variant: 'outline' },
 };
 
 export default function LandlordPropertyManagePage() {
-  const { user, isLoading: authLoading } = useAuth();
+  const { user, userType, isLoading: authLoading } = useAuth();
   const params = useParams();
   const router = useRouter();
   const propertyId = params.id as string;
+  const isAdmin = userType === 'admin';
 
   const [property, setProperty] = useState<PropertyWithPhotos | null>(null);
   const [loading, setLoading] = useState(true);
@@ -74,12 +79,21 @@ export default function LandlordPropertyManagePage() {
       try {
         setLoading(true);
         setError(null);
-        const { data: propertyData, error: propertyError } = await supabase
+
+        // Admins can manage any listing; owners only their own
+        let query = supabase
           .from('properties')
           .select(`*, photos:property_photos(id, property_id, photo_url, caption, display_order, created_at)`)
-          .eq('id', propertyId)
-          .eq('landlord_id', user.id)
-          .order('display_order', { foreignTable: 'photos', ascending: true });
+          .eq('id', propertyId);
+
+        if (!isAdmin) {
+          query = query.eq('landlord_id', user.id);
+        }
+
+        const { data: propertyData, error: propertyError } = await query.order(
+          'display_order',
+          { foreignTable: 'photos', ascending: true }
+        );
 
         if (propertyError) throw propertyError;
         if (!propertyData?.length) {
@@ -97,15 +111,20 @@ export default function LandlordPropertyManagePage() {
     };
 
     if (user && propertyId) fetchPropertyData();
-    return () => { abortControllerRef.current?.abort(); };
-  }, [user, propertyId]);
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, [user, propertyId, isAdmin]);
 
   const handleStatusChange = async (newStatus: string) => {
     if (!property) return;
-    const allowed = STATUS_TRANSITIONS[property.status] || [];
-    if (!allowed.includes(newStatus)) {
-      toast.error(`Cannot change from "${property.status}" to "${newStatus}"`);
-      return;
+    // Admins can set any status; owners follow transition rules
+    if (!isAdmin) {
+      const allowed = STATUS_TRANSITIONS[property.status] || [];
+      if (!allowed.includes(newStatus)) {
+        toast.error(`Cannot change from "${property.status}" to "${newStatus}"`);
+        return;
+      }
     }
     setIsUpdatingStatus(true);
     try {
@@ -126,11 +145,24 @@ export default function LandlordPropertyManagePage() {
   const handleDeleteProperty = async () => {
     if (!property) return;
     setDeleting(true);
-    const success = await deleteProperty(property.id);
-    setDeleting(false);
-    if (success) {
-      setDeleteDialogOpen(false);
-      router.push('/dashboard/landlord');
+    try {
+      if (isAdmin) {
+        const { error: delErr } = await supabase.from('properties').delete().eq('id', property.id);
+        if (delErr) throw delErr;
+        toast.success('Listing deleted');
+        setDeleteDialogOpen(false);
+        router.push('/dashboard/admin');
+      } else {
+        const success = await deleteProperty(property.id);
+        if (success) {
+          setDeleteDialogOpen(false);
+          router.push('/dashboard/landlord');
+        }
+      }
+    } catch {
+      toast.error('Delete failed');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -143,6 +175,45 @@ export default function LandlordPropertyManagePage() {
       variant: 'default' | 'outline';
       className?: string;
     }[] = [];
+
+    if (isAdmin) {
+      // Full control for admin
+      if (property.status !== 'active') {
+        actions.push({
+          label: 'Set active',
+          icon: CheckCircle,
+          action: () => handleStatusChange('active'),
+          variant: 'default',
+          className: 'bg-emerald-600 hover:bg-emerald-700 text-white',
+        });
+      }
+      if (property.status === 'active') {
+        actions.push({
+          label: 'Pause',
+          icon: XCircle,
+          action: () => handleStatusChange('paused'),
+          variant: 'outline',
+        });
+        actions.push({
+          label: 'Mark taken',
+          icon: CheckCircle,
+          action: () => handleStatusChange('taken'),
+          variant: 'outline',
+          className: 'text-blue-600 dark:text-blue-400 border-blue-600/40',
+        });
+      }
+      if (property.status === 'pending') {
+        actions.push({
+          label: 'Reject',
+          icon: XCircle,
+          action: () => handleStatusChange('rejected'),
+          variant: 'outline',
+          className: 'text-destructive',
+        });
+      }
+      return actions;
+    }
+
     const allowed = STATUS_TRANSITIONS[property.status] || [];
 
     if (allowed.includes('pending')) {
@@ -204,7 +275,9 @@ export default function LandlordPropertyManagePage() {
             <h2 className="text-xl font-bold mb-2">Not found</h2>
             <p className="text-muted-foreground mb-4 text-sm">{error || 'No access to this listing.'}</p>
             <Button asChild>
-              <Link href="/dashboard/landlord"><ArrowLeft className="mr-2 h-4 w-4" />Dashboard</Link>
+              <Link href={isAdmin ? '/dashboard/admin' : '/dashboard/landlord'}>
+                <ArrowLeft className="mr-2 h-4 w-4" />Dashboard
+              </Link>
             </Button>
           </CardContent>
         </Card>
@@ -218,6 +291,7 @@ export default function LandlordPropertyManagePage() {
   const intent = inferListingIntent(property);
   const period = property.price_period || (intent === 'sale' ? 'once' : 'month');
   const category = inferAssetCategory(property);
+  const backHref = isAdmin ? '/dashboard/admin' : '/dashboard/landlord';
 
   return (
     <div className="min-h-screen bg-background">
@@ -226,14 +300,21 @@ export default function LandlordPropertyManagePage() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-start gap-3 min-w-0">
               <Button variant="ghost" size="icon" asChild className="shrink-0">
-                <Link href="/dashboard/landlord"><ArrowLeft className="h-4 w-4" /></Link>
+                <Link href={backHref}>
+                  <ArrowLeft className="h-4 w-4" />
+                </Link>
               </Button>
               <div className="min-w-0">
                 <h1 className="text-lg font-semibold truncate text-foreground">{property.title}</h1>
                 <div className="flex items-center text-sm text-muted-foreground">
                   <MapPin className="h-3 w-3 mr-1 shrink-0" />
-                  <span className="truncate">{property.location_suburb}, {property.location_city}</span>
+                  <span className="truncate">
+                    {property.location_suburb}, {property.location_city}
+                  </span>
                 </div>
+                {isAdmin && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">Managing as admin</p>
+                )}
               </div>
               <Badge variant={statusConfig.variant} className={statusConfig.className}>
                 {statusConfig.label}
@@ -243,13 +324,15 @@ export default function LandlordPropertyManagePage() {
               {statusString !== 'draft' && statusString !== 'rejected' && (
                 <Button variant="outline" size="sm" asChild>
                   <Link href={`/properties/${property.id}`} target="_blank">
-                    <Eye className="mr-2 h-4 w-4" />Public
+                    <Eye className="mr-2 h-4 w-4" />
+                    Public
                   </Link>
                 </Button>
               )}
               <Button size="sm" asChild>
                 <Link href={`/dashboard/landlord/edit-property/${property.id}`}>
-                  <Edit className="mr-2 h-4 w-4" />Edit
+                  <Edit className="mr-2 h-4 w-4" />
+                  Edit
                 </Link>
               </Button>
             </div>
@@ -261,7 +344,12 @@ export default function LandlordPropertyManagePage() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
           {[
             { label: 'Views', value: property.views || 0, icon: Eye, color: 'text-blue-500' },
-            { label: 'Listed', value: new Date(property.created_at).toLocaleDateString(), icon: Calendar, color: 'text-violet-500' },
+            {
+              label: 'Listed',
+              value: new Date(property.created_at).toLocaleDateString(),
+              icon: Calendar,
+              color: 'text-violet-500',
+            },
             {
               label: 'Price',
               value: `E${property.price.toLocaleString()}${formatPricePeriod(period)}`,
@@ -295,14 +383,18 @@ export default function LandlordPropertyManagePage() {
             <div className="grid md:grid-cols-3 gap-6">
               <div className="md:col-span-2 space-y-6">
                 <Card>
-                  <CardHeader><CardTitle>Details</CardTitle></CardHeader>
+                  <CardHeader>
+                    <CardTitle>Details</CardTitle>
+                  </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <p className="text-sm text-muted-foreground">Price</p>
                         <p className="font-semibold text-foreground">
                           E{property.price.toLocaleString()}
-                          <span className="text-sm font-normal text-muted-foreground">{formatPricePeriod(period)}</span>
+                          <span className="text-sm font-normal text-muted-foreground">
+                            {formatPricePeriod(period)}
+                          </span>
                         </p>
                       </div>
                       <div>
@@ -345,7 +437,9 @@ export default function LandlordPropertyManagePage() {
                         <p className="text-sm text-muted-foreground mb-2">Features</p>
                         <div className="flex flex-wrap gap-2">
                           {property.amenities.map((a) => (
-                            <Badge key={a} variant="outline">{a}</Badge>
+                            <Badge key={a} variant="outline">
+                              {a}
+                            </Badge>
                           ))}
                         </div>
                       </div>
@@ -354,7 +448,12 @@ export default function LandlordPropertyManagePage() {
                     <div>
                       <p className="text-sm text-muted-foreground mb-1">Location</p>
                       <p className="text-foreground/90">
-                        {property.location_address && <>{property.location_address}<br /></>}
+                        {property.location_address && (
+                          <>
+                            {property.location_address}
+                            <br />
+                          </>
+                        )}
                         {property.location_suburb}, {property.location_city}
                       </p>
                     </div>
@@ -370,7 +469,9 @@ export default function LandlordPropertyManagePage() {
                 </Card>
 
                 <Card>
-                  <CardHeader><CardTitle>Status</CardTitle></CardHeader>
+                  <CardHeader>
+                    <CardTitle>Status</CardTitle>
+                  </CardHeader>
                   <CardContent>
                     <Badge variant={statusConfig.variant} className={`mb-4 ${statusConfig.className}`}>
                       {statusConfig.label}
@@ -395,37 +496,36 @@ export default function LandlordPropertyManagePage() {
                         ))}
                       </div>
                     )}
-                    {statusString === 'pending' && (
-                      <p className="text-sm text-amber-600 dark:text-amber-400 mt-4 flex items-center gap-2">
-                        <Clock className="h-4 w-4" />Under review — we’ll notify you when approved.
-                      </p>
-                    )}
-                    {statusString === 'rejected' && (
-                      <p className="text-sm text-destructive mt-4 flex items-center gap-2">
-                        <AlertCircle className="h-4 w-4" />Rejected — edit and resubmit.
-                      </p>
-                    )}
                   </CardContent>
                 </Card>
 
                 <Card>
-                  <CardHeader><CardTitle>Actions</CardTitle></CardHeader>
+                  <CardHeader>
+                    <CardTitle>Actions</CardTitle>
+                  </CardHeader>
                   <CardContent>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                       <Button variant="outline" className="flex-col h-auto py-4" asChild>
                         <Link href={`/dashboard/landlord/edit-property/${property.id}`}>
-                          <Edit className="h-5 w-5 mb-2" />Edit
+                          <Edit className="h-5 w-5 mb-2" />
+                          Edit
                         </Link>
                       </Button>
-                      <Button variant="outline" className="flex-col h-auto py-4" onClick={() => setActiveTab('photos')}>
-                        <Camera className="h-5 w-5 mb-2" />Photos
+                      <Button
+                        variant="outline"
+                        className="flex-col h-auto py-4"
+                        onClick={() => setActiveTab('photos')}
+                      >
+                        <Camera className="h-5 w-5 mb-2" />
+                        Photos
                       </Button>
                       <Button
                         variant="outline"
                         className="flex-col h-auto py-4 text-destructive hover:text-destructive"
                         onClick={() => setDeleteDialogOpen(true)}
                       >
-                        <Trash2 className="h-5 w-5 mb-2" />Delete
+                        <Trash2 className="h-5 w-5 mb-2" />
+                        Delete
                       </Button>
                     </div>
                   </CardContent>
@@ -434,7 +534,9 @@ export default function LandlordPropertyManagePage() {
 
               <div className="space-y-6">
                 <Card>
-                  <CardHeader><CardTitle>Performance</CardTitle></CardHeader>
+                  <CardHeader>
+                    <CardTitle>Performance</CardTitle>
+                  </CardHeader>
                   <CardContent className="space-y-3">
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Views</span>
@@ -442,18 +544,10 @@ export default function LandlordPropertyManagePage() {
                     </div>
                     <div className="flex justify-between text-sm items-center">
                       <span className="text-muted-foreground">Status</span>
-                      <Badge variant="outline" className="capitalize">{property.status}</Badge>
+                      <Badge variant="outline" className="capitalize">
+                        {property.status}
+                      </Badge>
                     </div>
-                    {statusString === 'active' && (
-                      <div className="mt-2 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-                        <p className="text-sm text-emerald-700 dark:text-emerald-400">Live and visible to seekers</p>
-                      </div>
-                    )}
-                    {statusString === 'draft' && (
-                      <div className="mt-2 p-3 rounded-lg bg-muted border border-border">
-                        <p className="text-sm text-muted-foreground">Draft — submit for review to go live</p>
-                      </div>
-                    )}
                   </CardContent>
                 </Card>
               </div>
@@ -466,7 +560,8 @@ export default function LandlordPropertyManagePage() {
                 <CardTitle>Photos</CardTitle>
                 <Button size="sm" asChild>
                   <Link href={`/dashboard/landlord/edit-property/${property.id}`}>
-                    <Camera className="mr-2 h-4 w-4" />Manage
+                    <Camera className="mr-2 h-4 w-4" />
+                    Manage
                   </Link>
                 </Button>
               </CardHeader>
@@ -500,7 +595,9 @@ export default function LandlordPropertyManagePage() {
               <CardContent className="py-16 text-center">
                 <BarChart className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
                 <h3 className="font-semibold mb-1 text-foreground">Analytics soon</h3>
-                <p className="text-sm text-muted-foreground">Views over time and engagement for your listings.</p>
+                <p className="text-sm text-muted-foreground">
+                  Views over time and engagement for this listing.
+                </p>
               </CardContent>
             </Card>
           </TabsContent>
@@ -514,7 +611,9 @@ export default function LandlordPropertyManagePage() {
               <h3 className="text-lg font-semibold mb-2 text-foreground">Delete listing?</h3>
               <p className="text-muted-foreground text-sm mb-4">This cannot be undone.</p>
               <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
+                <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
+                  Cancel
+                </Button>
                 <Button variant="destructive" onClick={handleDeleteProperty} disabled={deleting}>
                   {deleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                   Delete
