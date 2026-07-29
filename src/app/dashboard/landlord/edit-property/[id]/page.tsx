@@ -1,7 +1,7 @@
 // src/app/dashboard/landlord/edit-property/[id]/page.tsx
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -43,14 +43,17 @@ const extractStoragePath = (url: string): string | null => {
     const bucketIndex = pathParts.indexOf('property-photos');
     if (bucketIndex !== -1) return pathParts.slice(bucketIndex + 1).join('/');
     return null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 };
 
 export default function EditPropertyPage() {
-  const { user, isLoading: authLoading } = useAuth();
+  const { user, userType, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const params = useParams();
   const propertyId = params.id as string;
+  const isAdmin = userType === 'admin';
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -59,7 +62,12 @@ export default function EditPropertyPage() {
   const [existingPhotos, setExistingPhotos] = useState<any[]>([]);
   const [photosToDelete, setPhotosToDelete] = useState<string[]>([]);
 
-  const { files: newPhotos, previews: newPhotoPreviews, addFiles: addNewPhotos, removeFile: removeNewPhoto } = useMediaUpload({ maxFiles: MAX_PHOTOS });
+  const {
+    files: newPhotos,
+    previews: newPhotoPreviews,
+    addFiles: addNewPhotos,
+    removeFile: removeNewPhoto,
+  } = useMediaUpload({ maxFiles: MAX_PHOTOS });
 
   const [formData, setFormData] = useState({
     asset_category: 'residential' as AssetCategory,
@@ -104,17 +112,23 @@ export default function EditPropertyPage() {
       if (!user || !propertyId) return;
       try {
         setLoading(true);
-        const { data, error: fetchError } = await supabase
+        let query = supabase
           .from('properties')
           .select(`*, photos:property_photos (id, photo_url, caption, display_order, created_at)`)
-          .eq('id', propertyId)
-          .eq('landlord_id', user.id)
-          .single();
+          .eq('id', propertyId);
+
+        if (!isAdmin) {
+          query = query.eq('landlord_id', user.id);
+        }
+
+        const { data, error: fetchError } = await query.single();
 
         if (fetchError) {
-          setError(fetchError.code === 'PGRST116'
-            ? 'Property not found or you do not have permission'
-            : fetchError.message);
+          setError(
+            fetchError.code === 'PGRST116'
+              ? 'Property not found or you do not have permission'
+              : fetchError.message
+          );
           return;
         }
 
@@ -164,7 +178,7 @@ export default function EditPropertyPage() {
       }
     }
     if (!authLoading && user) fetchProperty();
-  }, [user, propertyId, authLoading]);
+  }, [user, propertyId, authLoading, isAdmin]);
 
   const handleAmenityToggle = (amenity: string) => {
     setFormData((prev) => ({
@@ -181,7 +195,14 @@ export default function EditPropertyPage() {
     setError(null);
 
     try {
-      if (!formData.title || !formData.description || !formData.price || !formData.city || !formData.suburb || !formData.contact_phone) {
+      if (
+        !formData.title ||
+        !formData.description ||
+        !formData.price ||
+        !formData.city ||
+        !formData.suburb ||
+        !formData.contact_phone
+      ) {
         setError('Fill in all required fields');
         setSaving(false);
         return;
@@ -219,10 +240,15 @@ export default function EditPropertyPage() {
       if (newPhotos.length > 0) {
         for (const photo of newPhotos) {
           const ext = photo.name.split('.').pop() || 'jpg';
-          const fileName = `${user?.id}/${propertyId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-          const { error: uploadError } = await supabase.storage.from('property-photos').upload(fileName, photo);
+          const ownerFolder = property?.landlord_id || user?.id;
+          const fileName = `${ownerFolder}/${propertyId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+          const { error: uploadError } = await supabase.storage
+            .from('property-photos')
+            .upload(fileName, photo);
           if (uploadError) throw new Error(uploadError.message);
-          const { data: { publicUrl } } = supabase.storage.from('property-photos').getPublicUrl(fileName);
+          const {
+            data: { publicUrl },
+          } = supabase.storage.from('property-photos').getPublicUrl(fileName);
           photoUrls.push(publicUrl);
         }
       }
@@ -273,7 +299,10 @@ export default function EditPropertyPage() {
         update.power_notes = formData.power_notes.trim() || null;
       }
 
-      const { error: updateError } = await supabase.from('properties').update(update).eq('id', propertyId);
+      const { error: updateError } = await supabase
+        .from('properties')
+        .update(update)
+        .eq('id', propertyId);
       if (updateError) throw new Error(updateError.message);
 
       if (photoUrls.length > 0) {
@@ -319,32 +348,51 @@ export default function EditPropertyPage() {
   if (error && !property) {
     return (
       <div className="container mx-auto px-4 py-8 max-w-3xl">
-        <Card><CardContent className="p-12 text-center">
-          <h2 className="text-2xl font-bold mb-2">Not found</h2>
-          <p className="text-muted-foreground mb-4">{error}</p>
-          <Button asChild><Link href="/dashboard/landlord"><ChevronLeft className="mr-2 h-4 w-4" />Dashboard</Link></Button>
-        </CardContent></Card>
+        <Card>
+          <CardContent className="p-12 text-center">
+            <h2 className="text-2xl font-bold mb-2">Not found</h2>
+            <p className="text-muted-foreground mb-4">{error}</p>
+            <Button asChild>
+              <Link href={isAdmin ? '/dashboard/admin' : '/dashboard/landlord'}>
+                <ChevronLeft className="mr-2 h-4 w-4" />
+                Dashboard
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }
 
-  const amenityList = isLand ? LAND_AMENITIES : isCommercial ? COMMERCIAL_AMENITIES : RESIDENTIAL_AMENITIES;
+  const amenityList = isLand
+    ? LAND_AMENITIES
+    : isCommercial
+      ? COMMERCIAL_AMENITIES
+      : RESIDENTIAL_AMENITIES;
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-3xl">
       <Button variant="ghost" asChild className="mb-4">
         <Link href={`/dashboard/landlord/properties/${propertyId}`}>
-          <ChevronLeft className="h-4 w-4 mr-1" />Back
+          <ChevronLeft className="h-4 w-4 mr-1" />
+          Back
         </Link>
       </Button>
       <h1 className="text-3xl font-bold mb-1">Edit listing</h1>
+      {isAdmin && (
+        <p className="text-sm text-amber-600 dark:text-amber-400 mb-2">Editing as admin</p>
+      )}
       <div className="flex gap-2 mb-6 flex-wrap">
         <Badge variant="outline">{ASSET_CATEGORY_LABELS[formData.asset_category]}</Badge>
         <Badge variant="outline">{LISTING_INTENT_LABELS[formData.listing_intent]}</Badge>
       </div>
 
       <form onSubmit={handleSubmit}>
-        {error && <Alert variant="destructive" className="mb-6"><AlertDescription>{error}</AlertDescription></Alert>}
+        {error && (
+          <Alert variant="destructive" className="mb-6">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
 
         <Card>
           <CardContent className="p-6 space-y-6">
@@ -352,9 +400,15 @@ export default function EditPropertyPage() {
               <h2 className="text-xl font-semibold">Basics</h2>
               <div>
                 <Label>Offer *</Label>
-                <Select value={formData.listing_intent}
-                  onValueChange={(v) => setFormData((p) => ({ ...p, listing_intent: v as ListingIntent }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                <Select
+                  value={formData.listing_intent}
+                  onValueChange={(v) =>
+                    setFormData((p) => ({ ...p, listing_intent: v as ListingIntent }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="sale">For sale</SelectItem>
                     <SelectItem value="long_rent">Long-term rent</SelectItem>
@@ -363,46 +417,86 @@ export default function EditPropertyPage() {
               </div>
               <div>
                 <Label>Subtype *</Label>
-                <Select value={formData.property_subtype}
-                  onValueChange={(v) => setFormData((p) => ({ ...p, property_subtype: v }))}>
-                  <SelectTrigger><SelectValue placeholder="Subtype" /></SelectTrigger>
+                <Select
+                  value={formData.property_subtype}
+                  onValueChange={(v) => setFormData((p) => ({ ...p, property_subtype: v }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Subtype" />
+                  </SelectTrigger>
                   <SelectContent>
-                    {isResidential && RESIDENTIAL_SUBTYPES.map((s) => (
-                      <SelectItem key={s} value={s}>{RESIDENTIAL_SUBTYPE_LABELS[s as ResidentialSubtype]}</SelectItem>
-                    ))}
-                    {isLand && LAND_SUBTYPES.map((s) => (
-                      <SelectItem key={s} value={s}>{LAND_SUBTYPE_LABELS[s as LandSubtype]}</SelectItem>
-                    ))}
-                    {isCommercial && COMMERCIAL_SUBTYPES.map((s) => (
-                      <SelectItem key={s} value={s}>{COMMERCIAL_SUBTYPE_LABELS[s as CommercialSubtype]}</SelectItem>
-                    ))}
+                    {isResidential &&
+                      RESIDENTIAL_SUBTYPES.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {RESIDENTIAL_SUBTYPE_LABELS[s as ResidentialSubtype]}
+                        </SelectItem>
+                      ))}
+                    {isLand &&
+                      LAND_SUBTYPES.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {LAND_SUBTYPE_LABELS[s as LandSubtype]}
+                        </SelectItem>
+                      ))}
+                    {isCommercial &&
+                      COMMERCIAL_SUBTYPES.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {COMMERCIAL_SUBTYPE_LABELS[s as CommercialSubtype]}
+                        </SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               </div>
               <div>
                 <Label>Title *</Label>
-                <Input value={formData.title} onChange={(e) => setFormData((p) => ({ ...p, title: e.target.value }))} required />
+                <Input
+                  value={formData.title}
+                  onChange={(e) => setFormData((p) => ({ ...p, title: e.target.value }))}
+                  required
+                />
               </div>
               <div>
                 <Label>Tenure *</Label>
-                <Select value={formData.tenure_type}
-                  onValueChange={(v) => setFormData((p) => ({ ...p, tenure_type: v as TenureType }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                <Select
+                  value={formData.tenure_type}
+                  onValueChange={(v) =>
+                    setFormData((p) => ({ ...p, tenure_type: v as TenureType }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
-                    {TENURE_TYPES.map((t) => <SelectItem key={t} value={t}>{TENURE_CONFIG[t].label}</SelectItem>)}
+                    {TENURE_TYPES.map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {TENURE_CONFIG[t].label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
-                <div className="mt-2"><TenureBadge tenure={formData.tenure_type} size="md" /></div>
+                <div className="mt-2">
+                  <TenureBadge tenure={formData.tenure_type} size="md" />
+                </div>
               </div>
               <div>
-                <Label>{formData.listing_intent === 'sale' ? 'Sale price (E) *' : 'Monthly rent (E) *'}</Label>
-                <Input type="number" min="1" value={formData.price}
-                  onChange={(e) => setFormData((p) => ({ ...p, price: e.target.value }))} required />
+                <Label>
+                  {formData.listing_intent === 'sale' ? 'Sale price (E) *' : 'Monthly rent (E) *'}
+                </Label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={formData.price}
+                  onChange={(e) => setFormData((p) => ({ ...p, price: e.target.value }))}
+                  required
+                />
               </div>
               <div>
                 <Label>Description *</Label>
-                <Textarea rows={5} value={formData.description}
-                  onChange={(e) => setFormData((p) => ({ ...p, description: e.target.value }))} required />
+                <Textarea
+                  rows={5}
+                  value={formData.description}
+                  onChange={(e) => setFormData((p) => ({ ...p, description: e.target.value }))}
+                  required
+                />
               </div>
             </div>
 
@@ -410,18 +504,36 @@ export default function EditPropertyPage() {
               <h2 className="text-xl font-semibold">Location</h2>
               <div>
                 <Label>City *</Label>
-                <Select value={formData.city} onValueChange={(v) => setFormData((p) => ({ ...p, city: v }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>{ESWATINI_CITIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                <Select
+                  value={formData.city}
+                  onValueChange={(v) => setFormData((p) => ({ ...p, city: v }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ESWATINI_CITIES.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
                 </Select>
               </div>
               <div>
                 <Label>Suburb *</Label>
-                <Input value={formData.suburb} onChange={(e) => setFormData((p) => ({ ...p, suburb: e.target.value }))} required />
+                <Input
+                  value={formData.suburb}
+                  onChange={(e) => setFormData((p) => ({ ...p, suburb: e.target.value }))}
+                  required
+                />
               </div>
               <div>
                 <Label>Address</Label>
-                <Input value={formData.address} onChange={(e) => setFormData((p) => ({ ...p, address: e.target.value }))} />
+                <Input
+                  value={formData.address}
+                  onChange={(e) => setFormData((p) => ({ ...p, address: e.target.value }))}
+                />
               </div>
             </div>
 
@@ -433,22 +545,47 @@ export default function EditPropertyPage() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <Label>Bedrooms</Label>
-                      <Select value={formData.bedrooms} onValueChange={(v) => setFormData((p) => ({ ...p, bedrooms: v }))}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>{ROOM_OPTIONS.map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}</SelectContent>
+                      <Select
+                        value={formData.bedrooms}
+                        onValueChange={(v) => setFormData((p) => ({ ...p, bedrooms: v }))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ROOM_OPTIONS.map((n) => (
+                            <SelectItem key={n} value={n}>
+                              {n}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
                       </Select>
                     </div>
                     <div>
                       <Label>Bathrooms</Label>
-                      <Select value={formData.bathrooms} onValueChange={(v) => setFormData((p) => ({ ...p, bathrooms: v }))}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>{BATH_OPTIONS.map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}</SelectContent>
+                      <Select
+                        value={formData.bathrooms}
+                        onValueChange={(v) => setFormData((p) => ({ ...p, bathrooms: v }))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {BATH_OPTIONS.map((n) => (
+                            <SelectItem key={n} value={n}>
+                              {n}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
                       </Select>
                     </div>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <Checkbox id="furn" checked={formData.is_furnished}
-                      onCheckedChange={(c) => setFormData((p) => ({ ...p, is_furnished: !!c }))} />
+                    <Checkbox
+                      id="furn"
+                      checked={formData.is_furnished}
+                      onCheckedChange={(c) => setFormData((p) => ({ ...p, is_furnished: !!c }))}
+                    />
                     <Label htmlFor="furn">Furnished</Label>
                   </div>
                 </>
@@ -458,27 +595,48 @@ export default function EditPropertyPage() {
                 <>
                   <div>
                     <Label>Size (ha) *</Label>
-                    <Input type="number" min="0.01" step="0.01" value={formData.land_size_ha}
-                      onChange={(e) => setFormData((p) => ({ ...p, land_size_ha: e.target.value }))} />
+                    <Input
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      value={formData.land_size_ha}
+                      onChange={(e) => setFormData((p) => ({ ...p, land_size_ha: e.target.value }))}
+                    />
                   </div>
                   <div className="flex items-center space-x-2">
-                    <Checkbox id="fenced" checked={formData.is_fenced}
-                      onCheckedChange={(c) => setFormData((p) => ({ ...p, is_fenced: !!c }))} />
+                    <Checkbox
+                      id="fenced"
+                      checked={formData.is_fenced}
+                      onCheckedChange={(c) => setFormData((p) => ({ ...p, is_fenced: !!c }))}
+                    />
                     <Label htmlFor="fenced">Fenced</Label>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
-                    {([['has_road_access', 'Road access'], ['has_water', 'Water'], ['has_electricity', 'Electricity'], ['has_sewer', 'Sewer']] as const).map(([k, l]) => (
+                    {(
+                      [
+                        ['has_road_access', 'Road access'],
+                        ['has_water', 'Water'],
+                        ['has_electricity', 'Electricity'],
+                        ['has_sewer', 'Sewer'],
+                      ] as const
+                    ).map(([k, l]) => (
                       <div key={k} className="flex items-center space-x-2">
-                        <Checkbox id={k} checked={formData[k]}
-                          onCheckedChange={(c) => setFormData((p) => ({ ...p, [k]: !!c }))} />
+                        <Checkbox
+                          id={k}
+                          checked={formData[k]}
+                          onCheckedChange={(c) => setFormData((p) => ({ ...p, [k]: !!c }))}
+                        />
                         <Label htmlFor={k}>{l}</Label>
                       </div>
                     ))}
                   </div>
                   <div>
                     <Label>Zoning notes</Label>
-                    <Textarea rows={2} value={formData.zoning_notes}
-                      onChange={(e) => setFormData((p) => ({ ...p, zoning_notes: e.target.value }))} />
+                    <Textarea
+                      rows={2}
+                      value={formData.zoning_notes}
+                      onChange={(e) => setFormData((p) => ({ ...p, zoning_notes: e.target.value }))}
+                    />
                   </div>
                 </>
               )}
@@ -487,47 +645,81 @@ export default function EditPropertyPage() {
                 <>
                   <div>
                     <Label>Floor area (m²) *</Label>
-                    <Input type="number" min="1" value={formData.floor_area_sqm}
-                      onChange={(e) => setFormData((p) => ({ ...p, floor_area_sqm: e.target.value }))} />
+                    <Input
+                      type="number"
+                      min="1"
+                      value={formData.floor_area_sqm}
+                      onChange={(e) =>
+                        setFormData((p) => ({ ...p, floor_area_sqm: e.target.value }))
+                      }
+                    />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <Label>Floors</Label>
-                      <Input type="number" min="0" value={formData.floors}
-                        onChange={(e) => setFormData((p) => ({ ...p, floors: e.target.value }))} />
+                      <Input
+                        type="number"
+                        min="0"
+                        value={formData.floors}
+                        onChange={(e) => setFormData((p) => ({ ...p, floors: e.target.value }))}
+                      />
                     </div>
                     <div>
                       <Label>Parking bays</Label>
-                      <Input type="number" min="0" value={formData.parking_bays}
-                        onChange={(e) => setFormData((p) => ({ ...p, parking_bays: e.target.value }))} />
+                      <Input
+                        type="number"
+                        min="0"
+                        value={formData.parking_bays}
+                        onChange={(e) => setFormData((p) => ({ ...p, parking_bays: e.target.value }))}
+                      />
                     </div>
                   </div>
                   <div>
                     <Label>Fit-out</Label>
-                    <Select value={formData.fit_out || undefined}
-                      onValueChange={(v) => setFormData((p) => ({ ...p, fit_out: v as FitOut }))}>
-                      <SelectTrigger><SelectValue placeholder="Optional" /></SelectTrigger>
+                    <Select
+                      value={formData.fit_out || undefined}
+                      onValueChange={(v) => setFormData((p) => ({ ...p, fit_out: v as FitOut }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Optional" />
+                      </SelectTrigger>
                       <SelectContent>
-                        {FIT_OUT_OPTIONS.map((f) => <SelectItem key={f} value={f}>{FIT_OUT_LABELS[f]}</SelectItem>)}
+                        {FIT_OUT_OPTIONS.map((f) => (
+                          <SelectItem key={f} value={f}>
+                            {FIT_OUT_LABELS[f]}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="flex flex-wrap gap-4">
                     <div className="flex items-center space-x-2">
-                      <Checkbox id="load" checked={formData.has_loading_bay}
-                        onCheckedChange={(c) => setFormData((p) => ({ ...p, has_loading_bay: !!c }))} />
+                      <Checkbox
+                        id="load"
+                        checked={formData.has_loading_bay}
+                        onCheckedChange={(c) =>
+                          setFormData((p) => ({ ...p, has_loading_bay: !!c }))
+                        }
+                      />
                       <Label htmlFor="load">Loading bay</Label>
                     </div>
                     <div className="flex items-center space-x-2">
-                      <Checkbox id="front" checked={formData.has_street_frontage}
-                        onCheckedChange={(c) => setFormData((p) => ({ ...p, has_street_frontage: !!c }))} />
+                      <Checkbox
+                        id="front"
+                        checked={formData.has_street_frontage}
+                        onCheckedChange={(c) =>
+                          setFormData((p) => ({ ...p, has_street_frontage: !!c }))
+                        }
+                      />
                       <Label htmlFor="front">Street frontage</Label>
                     </div>
                   </div>
                   <div>
                     <Label>Power notes</Label>
-                    <Input value={formData.power_notes}
-                      onChange={(e) => setFormData((p) => ({ ...p, power_notes: e.target.value }))} />
+                    <Input
+                      value={formData.power_notes}
+                      onChange={(e) => setFormData((p) => ({ ...p, power_notes: e.target.value }))}
+                    />
                   </div>
                 </>
               )}
@@ -537,9 +729,14 @@ export default function EditPropertyPage() {
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mt-2">
                   {amenityList.map((a) => (
                     <div key={a} className="flex items-center space-x-2">
-                      <Checkbox id={a} checked={formData.amenities.includes(a)}
-                        onCheckedChange={() => handleAmenityToggle(a)} />
-                      <Label htmlFor={a} className="text-sm">{a}</Label>
+                      <Checkbox
+                        id={a}
+                        checked={formData.amenities.includes(a)}
+                        onCheckedChange={() => handleAmenityToggle(a)}
+                      />
+                      <Label htmlFor={a} className="text-sm">
+                        {a}
+                      </Label>
                     </div>
                   ))}
                 </div>
@@ -548,8 +745,11 @@ export default function EditPropertyPage() {
               {formData.listing_intent === 'long_rent' && (
                 <div>
                   <Label>Lease terms</Label>
-                  <Textarea rows={2} value={formData.lease_terms}
-                    onChange={(e) => setFormData((p) => ({ ...p, lease_terms: e.target.value }))} />
+                  <Textarea
+                    rows={2}
+                    value={formData.lease_terms}
+                    onChange={(e) => setFormData((p) => ({ ...p, lease_terms: e.target.value }))}
+                  />
                 </div>
               )}
             </div>
@@ -558,15 +758,22 @@ export default function EditPropertyPage() {
               <h2 className="text-xl font-semibold mb-4">Photos</h2>
               {existingPhotos.filter((p) => !photosToDelete.includes(p.id)).length > 0 && (
                 <div className="grid grid-cols-3 md:grid-cols-5 gap-3 mb-4">
-                  {existingPhotos.filter((p) => !photosToDelete.includes(p.id)).map((photo) => (
-                    <div key={photo.id} className="relative aspect-square">
-                      <Image src={photo.photo_url} alt="" fill className="object-cover rounded-lg" />
-                      <Button type="button" variant="destructive" size="icon" className="absolute -top-2 -right-2 h-6 w-6"
-                        onClick={() => setPhotosToDelete((prev) => [...prev, photo.id])}>
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  ))}
+                  {existingPhotos
+                    .filter((p) => !photosToDelete.includes(p.id))
+                    .map((photo) => (
+                      <div key={photo.id} className="relative aspect-square">
+                        <Image src={photo.photo_url} alt="" fill className="object-cover rounded-lg" />
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="icon"
+                          className="absolute -top-2 -right-2 h-6 w-6"
+                          onClick={() => setPhotosToDelete((prev) => [...prev, photo.id])}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ))}
                 </div>
               )}
               {newPhotoPreviews.length > 0 && (
@@ -574,18 +781,30 @@ export default function EditPropertyPage() {
                   {newPhotoPreviews.map((preview, i) => (
                     <div key={i} className="relative aspect-square">
                       <Image src={preview} alt="" fill className="object-cover rounded-lg" />
-                      <Button type="button" variant="destructive" size="icon" className="absolute -top-2 -right-2 h-6 w-6"
-                        onClick={() => removeNewPhoto(i)}><X className="h-3 w-3" /></Button>
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="icon"
+                        className="absolute -top-2 -right-2 h-6 w-6"
+                        onClick={() => removeNewPhoto(i)}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
                     </div>
                   ))}
                 </div>
               )}
-              {(existingPhotos.length - photosToDelete.length + newPhotos.length) < MAX_PHOTOS && (
+              {existingPhotos.length - photosToDelete.length + newPhotos.length < MAX_PHOTOS && (
                 <label className="inline-flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-6 cursor-pointer hover:border-primary">
                   <Upload className="h-6 w-6 mb-1 text-muted-foreground" />
                   <span className="text-xs text-muted-foreground">Add photos</span>
-                  <input type="file" accept="image/*" multiple className="hidden"
-                    onChange={(e) => addNewPhotos(e.target.files || [])} />
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => addNewPhotos(e.target.files || [])}
+                  />
                 </label>
               )}
             </div>
@@ -594,22 +813,31 @@ export default function EditPropertyPage() {
               <h2 className="text-xl font-semibold">Contact</h2>
               <div>
                 <Label>Phone *</Label>
-                <Input value={formData.contact_phone}
+                <Input
+                  value={formData.contact_phone}
                   onChange={(e) => setFormData((p) => ({ ...p, contact_phone: e.target.value }))}
                   onBlur={() => {
                     if (formData.contact_phone) {
-                      setFormData((p) => ({ ...p, contact_phone: normalizeEswatiniPhone(p.contact_phone) }));
+                      setFormData((p) => ({
+                        ...p,
+                        contact_phone: normalizeEswatiniPhone(p.contact_phone),
+                      }));
                     }
                   }}
-                  required />
+                  required
+                />
                 {formData.contact_phone && (
-                  <p className="text-xs text-muted-foreground mt-1">Shows as {formatEswatiniPhone(formData.contact_phone)}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Shows as {formatEswatiniPhone(formData.contact_phone)}
+                  </p>
                 )}
               </div>
               <div>
                 <Label>WhatsApp</Label>
-                <Input value={formData.contact_whatsapp}
-                  onChange={(e) => setFormData((p) => ({ ...p, contact_whatsapp: e.target.value }))} />
+                <Input
+                  value={formData.contact_whatsapp}
+                  onChange={(e) => setFormData((p) => ({ ...p, contact_whatsapp: e.target.value }))}
+                />
               </div>
             </div>
           </CardContent>
@@ -620,7 +848,14 @@ export default function EditPropertyPage() {
             <Link href={`/dashboard/landlord/properties/${propertyId}`}>Cancel</Link>
           </Button>
           <Button type="submit" disabled={saving}>
-            {saving ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Saving…</> : 'Save changes'}
+            {saving ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Saving…
+              </>
+            ) : (
+              'Save changes'
+            )}
           </Button>
         </div>
       </form>
