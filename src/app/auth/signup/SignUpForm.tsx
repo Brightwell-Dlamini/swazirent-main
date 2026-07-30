@@ -72,10 +72,26 @@ type FormDataType = {
 };
 
 const ROLE_META: Record<FormRole, { label: string; icon: typeof User; blurb: string }> = {
-  seeker: { label: 'Seeker', icon: User, blurb: 'Looking for a place to rent or buy.' },
-  landlord: { label: 'Landlord', icon: Home, blurb: 'Property owner listing your own place.' },
-  broker: { label: 'Broker', icon: Building, blurb: 'Facilitator finding tenants or buyers.' },
-  agent: { label: 'Agent', icon: Briefcase, blurb: 'Licensed or established estate agent.' },
+  seeker: {
+    label: 'Renter/Buyer',
+    icon: User,
+    blurb: 'Looking for a place to rent or buy.',
+  },
+  landlord: {
+    label: 'Landlord',
+    icon: Home,
+    blurb: 'Property owner listing your own place.',
+  },
+  broker: {
+    label: 'Broker',
+    icon: Building,
+    blurb: 'Facilitator finding tenants or buyers.',
+  },
+  agent: {
+    label: 'Agent',
+    icon: Briefcase,
+    blurb: 'Licensed or established estate agent.',
+  },
 };
 
 export default function SignUpForm() {
@@ -123,10 +139,10 @@ export default function SignUpForm() {
       signUpSchema.parse(formData);
       setValidationErrors({});
       return true;
-    } catch (error) {
-      if (error instanceof z.ZodError) {
+    } catch (err) {
+      if (err instanceof z.ZodError) {
         const errors: Record<string, string> = {};
-        error.issues.forEach((issue) => {
+        err.issues.forEach((issue) => {
           const path = issue.path[0];
           if (path) errors[path.toString()] = issue.message;
         });
@@ -166,7 +182,7 @@ export default function SignUpForm() {
     } finally {
       setIsLoading(false);
     }
-  }
+  };
 
   if (!isMounted) {
     return (
@@ -215,40 +231,59 @@ export default function SignUpForm() {
           </CardHeader>
           <CardContent>
             <div className="space-y-6">
-              <SocialLoginButtons isLoading={isLoading || authLoading} onError={setError} />
-              <form onSubmit={handleSubmit} className="space-y-4">
-                {error && (
-                  <Alert variant="destructive">
-                    <AlertDescription>{error}</AlertDescription>
-                  </Alert>
-                )}
+              {error && (
+                <Alert variant="destructive">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
 
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium">I am a…</Label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {ROLES.map((role) => {
-                      const meta = ROLE_META[role];
-                      const Icon = meta.icon;
-                      const active = formData.userType === role;
-                      return (
-                        <Button
-                          key={role}
-                          type="button"
-                          variant={active ? 'default' : 'outline'}
-                          className={`h-20 flex flex-col items-center justify-center gap-1 text-xs ${
-                            active ? 'bg-primary text-primary-foreground' : ''
-                          }`}
-                          onClick={() => setFormData({ ...formData, userType: role })}
-                        >
-                          <Icon className="h-5 w-5" />
-                          <span>{meta.label}</span>
-                        </Button>
-                      );
-                    })}
-                  </div>
-                  <p className="text-xs text-muted-foreground">{ROLE_META[formData.userType].blurb}</p>
+              {/* 1. Role first — so Google inherits the choice */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">I am a…</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  {ROLES.map((role) => {
+                    const meta = ROLE_META[role];
+                    const Icon = meta.icon;
+                    const active = formData.userType === role;
+                    return (
+                      <Button
+                        key={role}
+                        type="button"
+                        variant={active ? 'default' : 'outline'}
+                        className={`h-20 flex flex-col items-center justify-center gap-1 text-xs ${
+                          active ? 'bg-primary text-primary-foreground' : ''
+                        }`}
+                        onClick={() => setFormData({ ...formData, userType: role })}
+                      >
+                        <Icon className="h-5 w-5" />
+                        <span>{meta.label}</span>
+                      </Button>
+                    );
+                  })}
                 </div>
+                <p className="text-xs text-muted-foreground">{ROLE_META[formData.userType].blurb}</p>
+              </div>
 
+              {/* 2. Google — uses the selected role above */}
+              <SocialLoginButtons
+                isLoading={isLoading || authLoading}
+                onError={setError}
+                userType={formData.userType}
+                showEmailDivider
+                dividerLabel="Or continue with Google"
+              />
+
+              {/* 3. Email form */}
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-background px-2 text-muted-foreground">Or with email</span>
+                </div>
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="fullName">Full name</Label>
                   <Input
@@ -338,7 +373,8 @@ export default function SignUpForm() {
                     I agree to the{' '}
                     <Link href="/terms" className="text-primary hover:underline">
                       Terms
-                    </Link>{' '}and{' '}
+                    </Link>{' '}
+                    and{' '}
                     <Link href="/privacy" className="text-primary hover:underline">
                       Privacy Policy
                     </Link>
