@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { canPostListings } from '@/types/user';
 import { supabase } from '@/lib/supabase';
+import { BETA_SKIP_VERIFICATION } from '@/lib/featureFlags';
 import { toast } from 'sonner';
 
 interface VerificationDocuments {
@@ -14,12 +15,21 @@ interface VerificationDocuments {
 
 export function useVerification() {
   const { user, userType, isLoading: authLoading } = useAuth();
-  const [isVerified, setIsVerified] = useState(false);
-  const [verificationLevel, setVerificationLevel] = useState('unverified');
-  const [isLoading, setIsLoading] = useState(true);
+  const [isVerified, setIsVerified] = useState(BETA_SKIP_VERIFICATION);
+  const [verificationLevel, setVerificationLevel] = useState(
+    BETA_SKIP_VERIFICATION ? 'verified' : 'unverified'
+  );
+  const [isLoading, setIsLoading] = useState(!BETA_SKIP_VERIFICATION);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const refreshVerification = useCallback(async () => {
+    if (BETA_SKIP_VERIFICATION) {
+      setIsVerified(true);
+      setVerificationLevel('verified');
+      setIsLoading(false);
+      return;
+    }
+
     if (!user) {
       setIsLoading(false);
       return;
@@ -54,6 +64,11 @@ export function useVerification() {
 
   const submitVerification = useCallback(
     async (documents?: VerificationDocuments) => {
+      if (BETA_SKIP_VERIFICATION) {
+        toast.info('Verification is paused during beta — you already have full access.');
+        return true;
+      }
+
       if (!user) {
         toast.error('You must be logged in');
         return false;
@@ -137,28 +152,34 @@ export function useVerification() {
   }, [submitVerification]);
 
   useEffect(() => {
+    if (BETA_SKIP_VERIFICATION) {
+      setIsVerified(true);
+      setVerificationLevel('verified');
+      setIsLoading(false);
+      return;
+    }
     if (user && canPostListings(userType) && !authLoading) {
       refreshVerification();
     }
   }, [user, userType, authLoading, refreshVerification]);
 
-  const isLandlordVerified = isVerified;
-  const isLandlordPending = verificationLevel === 'pending';
-  const isLandlordRejected = verificationLevel === 'rejected';
+  const isLandlordVerified = BETA_SKIP_VERIFICATION || isVerified;
+  const isLandlordPending = BETA_SKIP_VERIFICATION ? false : verificationLevel === 'pending';
+  const isLandlordRejected = BETA_SKIP_VERIFICATION ? false : verificationLevel === 'rejected';
 
   let status: 'unverified' | 'pending' | 'verified' | 'rejected' = 'unverified';
-  if (isVerified) status = 'verified';
+  if (BETA_SKIP_VERIFICATION || isVerified) status = 'verified';
   else if (verificationLevel === 'pending') status = 'pending';
   else if (verificationLevel === 'rejected') status = 'rejected';
 
   return {
-    isVerified,
-    verificationLevel,
+    isVerified: BETA_SKIP_VERIFICATION || isVerified,
+    verificationLevel: BETA_SKIP_VERIFICATION ? 'verified' : verificationLevel,
     isLandlordVerified,
     isLandlordPending,
     isLandlordRejected,
     status,
-    isLoading,
+    isLoading: BETA_SKIP_VERIFICATION ? false : isLoading,
     isSubmitting,
     refreshVerification,
     submitVerification,
