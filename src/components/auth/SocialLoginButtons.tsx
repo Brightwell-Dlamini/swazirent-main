@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { getAuthCallbackUrl } from '@/lib/siteUrl';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2 } from 'lucide-react';
@@ -20,45 +21,32 @@ export default function SocialLoginButtons({
 }: SocialLoginButtonsProps) {
   const [loadingProvider, setLoadingProvider] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [redirectUrl, setRedirectUrl] = useState<string>('');
-
-  useEffect(() => {
-    const getRedirectUrl = () => {
-      // For Vercel deployments (Production, Preview, etc.)
-      if (process.env.NEXT_PUBLIC_VERCEL_URL) {
-        return `https://${process.env.NEXT_PUBLIC_VERCEL_URL}/auth/callback`;
-      }
-      
-      // For custom domain with explicit APP_URL
-      if (process.env.NEXT_PUBLIC_APP_URL) {
-        return `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback`;
-      }
-      
-      // For local development
-      if (typeof window !== 'undefined') {
-        return `${window.location.origin}/auth/callback`;
-      }
-      
-      // Ultimate fallback
-      return '/auth/callback';
-    };
-    
-    setRedirectUrl(getRedirectUrl());
-  }, []);
 
   const handleGoogleLogin = async () => {
-    if (!redirectUrl) {
-      setError('Redirect URL not configured. Please try again.');
-      return;
+    // Always compute at click time from the browser origin — never a baked-in localhost
+    const redirectUrl = getAuthCallbackUrl();
+
+    if (!redirectUrl || redirectUrl.includes('localhost')) {
+      // If someone is testing on localhost that's fine; on production this must not happen
+      if (
+        typeof window !== 'undefined' &&
+        !window.location.hostname.includes('localhost') &&
+        !window.location.hostname.includes('127.0.0.1')
+      ) {
+        setError(
+          'Redirect URL misconfigured. Set NEXT_PUBLIC_SITE_URL to your live domain and check Supabase Auth redirect URLs.'
+        );
+        return;
+      }
     }
 
     setLoadingProvider('google');
     setError(null);
 
     try {
-      console.log('🔑 Google OAuth Redirect URL:', redirectUrl);
+      console.log('🔑 Google OAuth redirectTo:', redirectUrl);
 
-      const { data, error } = await supabase.auth.signInWithOAuth({
+      const { error: oauthError } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
           redirectTo: redirectUrl,
@@ -69,28 +57,29 @@ export default function SocialLoginButtons({
         },
       });
 
-      if (error) {
-        console.error('Supabase OAuth error:', error);
-        
-        if (error.message.includes('provider is not enabled')) {
+      if (oauthError) {
+        console.error('Supabase OAuth error:', oauthError);
+
+        if (oauthError.message.includes('provider is not enabled')) {
           setError('Google login is not enabled. Please contact support.');
-        } else if (error.message.includes('invalid client')) {
-          setError('Google configuration is invalid. Please try again later.');
-        } else if (error.message.includes('redirect_uri_mismatch')) {
-          setError('Redirect URL mismatch. Please ensure both the app and Google Cloud Console have the correct URLs configured.');
+        } else if (oauthError.message.includes('redirect_uri_mismatch')) {
+          setError(
+            'Redirect URL mismatch. Add this exact URL in Supabase Auth → URL Configuration and Google Cloud Console: ' +
+              redirectUrl
+          );
         } else {
-          setError(error.message);
+          setError(oauthError.message);
         }
-        onError?.(error.message);
+        onError?.(oauthError.message);
         setLoadingProvider(null);
         return;
       }
 
-      console.log('✅ OAuth initiated successfully:', data);
       onSuccess?.();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to sign in with Google';
-      console.error('Google sign-in error:', error);
+      // Browser navigates to Google; no further UI work
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to sign in with Google';
+      console.error('Google sign-in error:', err);
       setError(message);
       onError?.(message);
       setLoadingProvider(null);
@@ -112,7 +101,7 @@ export default function SocialLoginButtons({
         variant="outline"
         className="w-full relative h-11"
         onClick={handleGoogleLogin}
-        disabled={isGoogleLoading || !redirectUrl}
+        disabled={isGoogleLoading}
       >
         {isGoogleLoading ? (
           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -127,9 +116,7 @@ export default function SocialLoginButtons({
           <span className="w-full border-t" />
         </div>
         <div className="relative flex justify-center text-xs uppercase">
-          <span className="bg-background px-2 text-muted-foreground">
-            Or continue with email
-          </span>
+          <span className="bg-background px-2 text-muted-foreground">Or continue with email</span>
         </div>
       </div>
     </div>
