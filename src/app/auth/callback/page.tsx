@@ -9,167 +9,167 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useAuth } from '@/contexts/AuthContext';
+import { getDefaultRedirect, normalizeUserType } from '@/types/user';
 
-// Component that uses useSearchParams
 function CallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { refreshUser } = useAuth();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [message, setMessage] = useState<string>('Processing...');
-  const [userType, setUserType] = useState<'renter' | 'landlord' | null>(null);
+  const [userTypeLabel, setUserTypeLabel] = useState<string | null>(null);
   const [showResendButton, setShowResendButton] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
+
     const handleCallback = async () => {
       try {
-        // Get the current session
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-        
-        if (sessionError) {
-          console.error('Session error:', sessionError);
-          setStatus('error');
-          setMessage(sessionError.message || 'Failed to authenticate. Please try again.');
-          setShowResendButton(true);
+        // PKCE / OAuth: code in query string
+        const code = searchParams.get('code');
+        if (code) {
+          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+          if (exchangeError) {
+            console.error('exchangeCodeForSession:', exchangeError);
+            if (!cancelled) {
+              setStatus('error');
+              setMessage(exchangeError.message || 'Failed to complete sign-in.');
+              setShowResendButton(false);
+            }
+            return;
+          }
+        }
+
+        // Also surface provider errors from the URL
+        const errorCode = searchParams.get('error_code') || searchParams.get('error');
+        const errorDescription = searchParams.get('error_description');
+        if (errorCode && !code) {
+          if (!cancelled) {
+            setStatus('error');
+            setMessage(errorDescription || 'Authentication failed. Please try again.');
+          }
           return;
         }
 
-        // Check if we have a session
-        if (session) {
-          // User is authenticated
+        const {
+          data: { session },
+          error: sessionError,
+        } = await supabase.auth.getSession();
+
+        if (sessionError) {
+          console.error('Session error:', sessionError);
+          if (!cancelled) {
+            setStatus('error');
+            setMessage(sessionError.message || 'Failed to authenticate. Please try again.');
+            setShowResendButton(true);
+          }
+          return;
+        }
+
+        if (session?.user) {
           const user = session.user;
-          
-          // Check if user has a profile
-          const { data: profile, error: profileError } = await supabase
+
+          const { data: profile } = await supabase
             .from('profiles')
             .select('user_type, is_verified, full_name')
             .eq('id', user.id)
             .maybeSingle();
 
-          let userTypeValue = user.user_metadata?.user_type || 'renter';
+          let role = normalizeUserType(
+            profile?.user_type || user.user_metadata?.user_type || 'seeker'
+          );
 
-          // If no profile exists, create one
-          if (!profile && !profileError) {
-            const fullName = user.user_metadata?.full_name || 
-                            user.user_metadata?.name || 
-                            user.email?.split('@')[0] || 
-                            'User';
+          if (!profile) {
+            const fullName =
+              user.user_metadata?.full_name ||
+              user.user_metadata?.name ||
+              user.email?.split('@')[0] ||
+              'User';
 
-            const { error: createError } = await supabase
-              .from('profiles')
-              .insert({
+            const { error: createError } = await supabase.from('profiles').upsert(
+              {
                 id: user.id,
                 email: user.email,
                 full_name: fullName,
-                user_type: userTypeValue,
-                is_verified: user.email_confirmed_at ? true : false,
+                user_type: role,
+                is_verified: false,
                 phone: user.user_metadata?.phone || null,
-                created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
-              });
+              },
+              { onConflict: 'id' }
+            );
 
-            if (createError) {
-              console.error('Failed to create profile:', createError);
-            }
-          } else if (profile) {
-            userTypeValue = profile.user_type || userTypeValue;
+            if (createError) console.error('Failed to create profile:', createError);
           }
 
-          setUserType(userTypeValue);
-
-          // Check if email is verified
-          if (user.email_confirmed_at) {
-            // Email is verified
+          if (!cancelled) {
+            setUserTypeLabel(role);
             setStatus('success');
-            
-            // Check if this is a social login or email verification
-            const isSocialLogin = searchParams.get('provider') !== null;
-            
-            if (isSocialLogin) {
-              setMessage(`Successfully signed in with ${searchParams.get('provider')}! Redirecting...`);
-            } else {
-              setMessage('Email verified successfully! Redirecting...');
-            }
-            
-            // Refresh user data in context
-            await refreshUser();
-            
-            // Redirect based on user type after a delay
-            setTimeout(() => {
-              if (userTypeValue === 'landlord') {
-                router.push('/dashboard/landlord');
-              } else if (userTypeValue === 'admin') {
-                router.push('/dashboard/admin');
-              } else {
-                router.push('/dashboard/renter');
-              }
-            }, 2000);
-          } else {
-            // Email not verified
-            setStatus('error');
-            setMessage('Please verify your email address before continuing. Check your inbox for the verification link.');
-            setShowResendButton(true);
+            setMessage('Signed in successfully. Redirecting…');
           }
-        } else {
-          // Check if this is a password reset callback
-          const type = searchParams.get('type');
-          
-          if (type === 'recovery') {
-            // This is a password reset flow
+
+          await refreshUser();
+
+          // Google users are typically email-confirmed by the provider
+          setTimeout(() => {
+            if (!cancelled) router.replace(getDefaultRedirect(role));
+          }, 1200);
+          return;
+        }
+
+        // Password recovery
+        const type = searchParams.get('type');
+        if (type === 'recovery') {
+          if (!cancelled) {
             setStatus('success');
-            setMessage('Password reset link verified! Redirecting to update password...');
-            setTimeout(() => {
-              router.push('/auth/update-password');
-            }, 1500);
-            return;
+            setMessage('Password reset link verified. Redirecting…');
           }
+          setTimeout(() => {
+            if (!cancelled) router.replace('/auth/update-password');
+          }, 1200);
+          return;
+        }
 
-          // Check for error in URL
-          const errorCode = searchParams.get('error_code');
-          const errorDescription = searchParams.get('error_description');
-          
-          if (errorCode) {
-            setStatus('error');
-            setMessage(errorDescription || 'Authentication failed. Please try again.');
-            setShowResendButton(true);
-            return;
-          }
-
-          // No session - user hasn't confirmed email yet
+        if (!cancelled) {
           setStatus('error');
-          setMessage('Unable to verify your email. Please check your email for the confirmation link.');
+          setMessage(
+            'No session found. If you signed in with Google, check Supabase Site URL and Redirect URLs are set to your live domain — not localhost.'
+          );
           setShowResendButton(true);
         }
-      } catch (error) {
-        console.error('Callback error:', error);
-        setStatus('error');
-        setMessage('An unexpected error occurred. Please try again.');
-        setShowResendButton(true);
+      } catch (err) {
+        console.error('Callback error:', err);
+        if (!cancelled) {
+          setStatus('error');
+          setMessage('An unexpected error occurred. Please try again.');
+          setShowResendButton(true);
+        }
       }
     };
 
     handleCallback();
+    return () => {
+      cancelled = true;
+    };
   }, [router, searchParams, refreshUser]);
 
   const handleResendVerification = async () => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (session?.user?.email) {
         const { error } = await supabase.auth.resend({
           type: 'signup',
-          email: session.user.email!,
+          email: session.user.email,
         });
-        
         if (error) {
-          console.error('Resend error:', error);
           alert('Failed to resend verification email. Please try again.');
           return;
         }
-        
         alert('Verification email resent! Please check your inbox.');
       }
-    } catch (error) {
-      console.error('Resend error:', error);
+    } catch {
       alert('Failed to resend verification email. Please try again.');
     }
   };
@@ -180,98 +180,77 @@ function CallbackContent() {
         <Card>
           <CardHeader>
             <CardTitle className="text-2xl font-bold text-center">
-              {status === 'loading' ? 'Processing' : 
-               status === 'success' ? 'Success!' : 'Verification Failed'}
+              {status === 'loading'
+                ? 'Signing you in'
+                : status === 'success'
+                  ? 'Success!'
+                  : 'Sign-in failed'}
             </CardTitle>
             <CardDescription className="text-center">
-              {status === 'loading' ? 'Please wait while we verify your account...' : 
-               status === 'success' ? 'Your account has been verified' : 'We encountered an issue'}
+              {status === 'loading'
+                ? 'Please wait…'
+                : status === 'success'
+                  ? 'You are signed in'
+                  : 'We could not complete sign-in'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            {/* Status Icon */}
             <div className="flex justify-center">
-              {status === 'loading' && (
-                <div className="relative">
-                  <Loader2 className="h-16 w-16 animate-spin text-primary" />
-                  <Mail className="h-6 w-6 absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-primary/70" />
-                </div>
-              )}
+              {status === 'loading' && <Loader2 className="h-16 w-16 animate-spin text-primary" />}
               {status === 'success' && (
-                <div className="h-20 w-20 rounded-full bg-green-100 flex items-center justify-center animate-in fade-in zoom-in duration-500">
-                  <CheckCircle className="h-12 w-12 text-green-600" />
+                <div className="h-20 w-20 rounded-full bg-emerald-500/15 flex items-center justify-center">
+                  <CheckCircle className="h-12 w-12 text-emerald-600" />
                 </div>
               )}
               {status === 'error' && (
-                <div className="h-20 w-20 rounded-full bg-red-100 flex items-center justify-center animate-in fade-in zoom-in duration-500">
+                <div className="h-20 w-20 rounded-full bg-red-500/15 flex items-center justify-center">
                   <XCircle className="h-12 w-12 text-red-600" />
                 </div>
               )}
             </div>
 
-            {/* Message */}
             <div className="text-center">
-              <p className="text-gray-700 text-lg font-medium">{message}</p>
-              {userType && status === 'success' && (
-                <div className="mt-4 flex items-center justify-center gap-2 text-sm text-gray-500">
-                  {userType === 'landlord' ? (
+              <p className="text-foreground text-base font-medium">{message}</p>
+              {userTypeLabel && status === 'success' && (
+                <div className="mt-4 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                  {userTypeLabel === 'landlord' ||
+                  userTypeLabel === 'broker' ||
+                  userTypeLabel === 'agent' ? (
                     <Building className="h-4 w-4" />
                   ) : (
                     <User className="h-4 w-4" />
                   )}
-                  <span>Account type: {userType.charAt(0).toUpperCase() + userType.slice(1)}</span>
+                  <span className="capitalize">{userTypeLabel}</span>
                 </div>
               )}
             </div>
 
-            {/* Loading indicator for redirect */}
             {status === 'success' && (
-              <div className="text-center">
-                <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Redirecting to your dashboard...</span>
-                </div>
+              <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Redirecting to your dashboard…</span>
               </div>
             )}
 
-            {/* Error actions */}
             {status === 'error' && (
               <div className="space-y-4">
                 {showResendButton && (
                   <Alert>
                     <AlertDescription>
-                      Didn't receive the email? Check your spam folder or request a new one.
+                      If this was email signup, check spam or resend the verification link.
                     </AlertDescription>
                   </Alert>
                 )}
-                
                 <div className="flex flex-col gap-3">
                   {showResendButton && (
-                    <Button
-                      onClick={handleResendVerification}
-                      variant="outline"
-                      className="w-full"
-                    >
+                    <Button onClick={handleResendVerification} variant="outline" className="w-full">
                       <Mail className="mr-2 h-4 w-4" />
-                      Resend Verification Email
+                      Resend verification email
                     </Button>
                   )}
-                  <Button
-                    onClick={() => router.push('/auth/login')}
-                    variant={showResendButton ? 'default' : 'default'}
-                    className="w-full"
-                  >
+                  <Button onClick={() => router.push('/auth/login')} className="w-full">
                     Go to Login
                   </Button>
-                  {!showResendButton && (
-                    <Button
-                      onClick={() => router.push('/')}
-                      variant="outline"
-                      className="w-full"
-                    >
-                      Return Home
-                    </Button>
-                  )}
                 </div>
               </div>
             )}
@@ -282,23 +261,15 @@ function CallbackContent() {
   );
 }
 
-// Main page component with Suspense boundary
 export default function AuthCallback() {
   return (
-    <Suspense fallback={
-      <div className="container mx-auto px-4 py-16">
-        <div className="max-w-md mx-auto">
-          <Card>
-            <CardContent className="pt-6">
-              <div className="text-center space-y-4">
-                <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
-                <p className="text-gray-600">Loading...</p>
-              </div>
-            </CardContent>
-          </Card>
+    <Suspense
+      fallback={
+        <div className="container mx-auto px-4 py-16 flex justify-center">
+          <Loader2 className="h-12 w-12 animate-spin text-primary" />
         </div>
-      </div>
-    }>
+      }
+    >
       <CallbackContent />
     </Suspense>
   );
