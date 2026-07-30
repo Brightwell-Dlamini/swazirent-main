@@ -15,9 +15,23 @@ interface SocialLoginButtonsProps {
   onSuccess?: () => void;
   /** Role chosen on signup — stored and applied after Google returns */
   userType?: UserType | string | null;
-  /** Hide the "Or continue with email" divider (e.g. when Google is below the form fields) */
-  showEmailDivider?: boolean;
+  showDivider?: boolean;
+  /** 'above' = signup (after role cards); 'below' = login (before email form) */
+  dividerPosition?: 'above' | 'below';
   dividerLabel?: string;
+}
+
+function Divider({ label }: { label: string }) {
+  return (
+    <div className="relative">
+      <div className="absolute inset-0 flex items-center">
+        <span className="w-full border-t" />
+      </div>
+      <div className="relative flex justify-center text-xs uppercase">
+        <span className="bg-background px-2 text-muted-foreground">{label}</span>
+      </div>
+    </div>
+  );
 }
 
 export default function SocialLoginButtons({
@@ -25,7 +39,8 @@ export default function SocialLoginButtons({
   onError,
   onSuccess,
   userType,
-  showEmailDivider = true,
+  showDivider = true,
+  dividerPosition = 'below',
   dividerLabel = 'Or continue with email',
 }: SocialLoginButtonsProps) {
   const [loadingProvider, setLoadingProvider] = useState<string | null>(null);
@@ -47,13 +62,10 @@ export default function SocialLoginButtons({
       }
     }
 
-    // Persist role so /auth/callback can apply it after Google returns
-    if (typeof window !== 'undefined') {
-      if (userType) {
-        const role = normalizeUserType(userType);
-        if (role !== 'admin') {
-          localStorage.setItem(PENDING_USER_TYPE_KEY, role);
-        }
+    if (typeof window !== 'undefined' && userType) {
+      const role = normalizeUserType(userType);
+      if (role !== 'admin') {
+        localStorage.setItem(PENDING_USER_TYPE_KEY, role);
       }
     }
 
@@ -61,8 +73,6 @@ export default function SocialLoginButtons({
     setError(null);
 
     try {
-      console.log('🔑 Google OAuth redirectTo:', redirectUrl, 'role:', userType);
-
       const { error: oauthError } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
@@ -112,16 +122,7 @@ export default function SocialLoginButtons({
         </Alert>
       )}
 
-      {showEmailDivider && (
-        <div className="relative">
-          <div className="absolute inset-0 flex items-center">
-            <span className="w-full border-t" />
-          </div>
-          <div className="relative flex justify-center text-xs uppercase">
-            <span className="bg-background px-2 text-muted-foreground">{dividerLabel}</span>
-          </div>
-        </div>
-      )}
+      {showDivider && dividerPosition === 'above' && <Divider label={dividerLabel} />}
 
       <Button
         type="button"
@@ -137,6 +138,8 @@ export default function SocialLoginButtons({
         )}
         Continue with Google
       </Button>
+
+      {showDivider && dividerPosition === 'below' && <Divider label={dividerLabel} />}
     </div>
   );
 }
