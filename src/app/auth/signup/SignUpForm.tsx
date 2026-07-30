@@ -182,7 +182,7 @@ export default function SignUpForm() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }
 
   if (!isMounted) {
     return (
@@ -237,7 +237,7 @@ export default function SignUpForm() {
                 </Alert>
               )}
 
-              {/* 1. Role first — so Google inherits the choice */}
+              {/* 1. Role first */}
               <div className="space-y-2">
                 <Label className="text-sm font-medium">I am a…</Label>
                 <div className="grid grid-cols-2 gap-2">
@@ -264,12 +264,13 @@ export default function SignUpForm() {
                 <p className="text-xs text-muted-foreground">{ROLE_META[formData.userType].blurb}</p>
               </div>
 
-              {/* 2. Google — uses the selected role above */}
+              {/* 2. Google inherits selected role */}
               <SocialLoginButtons
                 isLoading={isLoading || authLoading}
                 onError={setError}
                 userType={formData.userType}
-                showEmailDivider
+                showDivider
+                dividerPosition="above"
                 dividerLabel="Or continue with Google"
               />
 
