@@ -9,7 +9,35 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useAuth } from '@/contexts/AuthContext';
-import { getDefaultRedirect, normalizeUserType } from '@/types/user';
+import {
+  getDefaultRedirect,
+  getUserTypeLabel,
+  normalizeUserType,
+  PENDING_USER_TYPE_KEY,
+  type UserType,
+} from '@/types/user';
+
+function readPendingRole(): UserType | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(PENDING_USER_TYPE_KEY);
+    if (!raw) return null;
+    const role = normalizeUserType(raw);
+    // Never allow elevating to admin via this path
+    if (role === 'admin') return null;
+    return role;
+  } catch {
+    return null;
+  }
+}
+
+function clearPendingRole() {
+  try {
+    localStorage.removeItem(PENDING_USER_TYPE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 function CallbackContent() {
   const router = useRouter();
@@ -25,7 +53,6 @@ function CallbackContent() {
 
     const handleCallback = async () => {
       try {
-        // PKCE / OAuth: code in query string
         const code = searchParams.get('code');
         if (code) {
           const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
@@ -40,7 +67,6 @@ function CallbackContent() {
           }
         }
 
-        // Also surface provider errors from the URL
         const errorCode = searchParams.get('error_code') || searchParams.get('error');
         const errorDescription = searchParams.get('error_description');
         if (errorCode && !code) {
@@ -68,6 +94,7 @@ function CallbackContent() {
 
         if (session?.user) {
           const user = session.user;
+          const pendingRole = readPendingRole();
 
           const { data: profile } = await supabase
             .from('profiles')
@@ -75,49 +102,63 @@ function CallbackContent() {
             .eq('id', user.id)
             .maybeSingle();
 
-          let role = normalizeUserType(
-            profile?.user_type || user.user_metadata?.user_type || 'seeker'
+          // Prefer role chosen on signup (Google path). Do not overwrite admin.
+          let role: UserType;
+          if (profile?.user_type === 'admin') {
+            role = 'admin';
+          } else if (pendingRole) {
+            role = pendingRole;
+          } else if (profile?.user_type) {
+            role = normalizeUserType(profile.user_type);
+          } else {
+            role = normalizeUserType(user.user_metadata?.user_type || 'seeker');
+          }
+
+          const fullName =
+            profile?.full_name ||
+            user.user_metadata?.full_name ||
+            user.user_metadata?.name ||
+            user.email?.split('@')[0] ||
+            'User';
+
+          // Upsert profile with the resolved role (fixes Google → always seeker)
+          const { error: upsertError } = await supabase.from('profiles').upsert(
+            {
+              id: user.id,
+              email: user.email,
+              full_name: fullName,
+              user_type: role,
+              is_verified: profile?.is_verified ?? false,
+              phone: user.user_metadata?.phone || null,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'id' }
           );
 
-          if (!profile) {
-            const fullName =
-              user.user_metadata?.full_name ||
-              user.user_metadata?.name ||
-              user.email?.split('@')[0] ||
-              'User';
+          if (upsertError) console.error('Failed to upsert profile:', upsertError);
 
-            const { error: createError } = await supabase.from('profiles').upsert(
-              {
-                id: user.id,
-                email: user.email,
-                full_name: fullName,
-                user_type: role,
-                is_verified: false,
-                phone: user.user_metadata?.phone || null,
-                updated_at: new Date().toISOString(),
-              },
-              { onConflict: 'id' }
-            );
-
-            if (createError) console.error('Failed to create profile:', createError);
+          // Keep auth metadata in sync so later logins don't re-default
+          if (pendingRole) {
+            await supabase.auth.updateUser({
+              data: { user_type: role, full_name: fullName },
+            });
+            clearPendingRole();
           }
 
           if (!cancelled) {
-            setUserTypeLabel(role);
+            setUserTypeLabel(getUserTypeLabel(role));
             setStatus('success');
             setMessage('Signed in successfully. Redirecting…');
           }
 
           await refreshUser();
 
-          // Google users are typically email-confirmed by the provider
           setTimeout(() => {
             if (!cancelled) router.replace(getDefaultRedirect(role));
           }, 1200);
           return;
         }
 
-        // Password recovery
         const type = searchParams.get('type');
         if (type === 'recovery') {
           if (!cancelled) {
@@ -213,14 +254,14 @@ function CallbackContent() {
               <p className="text-foreground text-base font-medium">{message}</p>
               {userTypeLabel && status === 'success' && (
                 <div className="mt-4 flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                  {userTypeLabel === 'landlord' ||
-                  userTypeLabel === 'broker' ||
-                  userTypeLabel === 'agent' ? (
+                  {userTypeLabel.includes('Landlord') ||
+                  userTypeLabel.includes('Broker') ||
+                  userTypeLabel.includes('Agent') ? (
                     <Building className="h-4 w-4" />
                   ) : (
                     <User className="h-4 w-4" />
                   )}
-                  <span className="capitalize">{userTypeLabel}</span>
+                  <span>{userTypeLabel}</span>
                 </div>
               )}
             </div>
