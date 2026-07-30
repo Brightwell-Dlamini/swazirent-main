@@ -264,17 +264,15 @@ export default function SignUpForm() {
                 <p className="text-xs text-muted-foreground">{ROLE_META[formData.userType].blurb}</p>
               </div>
 
-              {/* 2. Google inherits selected role */}
+              {/* 2. Google — primary signup path, no "or" divider */}
               <SocialLoginButtons
                 isLoading={isLoading || authLoading}
                 onError={setError}
                 userType={formData.userType}
-                showDivider
-                dividerPosition="above"
-                dividerLabel="Or continue with Google"
+                showDivider={false}
               />
 
-              {/* 3. Email form */}
+              {/* 3. Alternative: email */}
               <div className="relative">
                 <div className="absolute inset-0 flex items-center">
                   <span className="w-full border-t" />
