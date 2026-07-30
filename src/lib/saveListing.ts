@@ -8,6 +8,7 @@ import {
   defaultPricePeriod,
   subtypeToLegacyPropertyType,
 } from '@/types/property';
+import { BETA_AUTO_PUBLISH } from '@/lib/featureFlags';
 
 export type ListingFormPayload = {
   asset_category: AssetCategory | '';
@@ -44,20 +45,27 @@ export type ListingFormPayload = {
 };
 
 export type SaveListingResult =
-  | { ok: true; id: string }
+  | { ok: true; id: string; status: string }
   | { ok: false; error: string };
 
 /**
  * Insert a property row. Drafts allow incomplete data.
- * Never hangs — always resolves with ok/error.
+ * During beta, publish requests become `active` immediately.
  */
 export async function saveListingRow(opts: {
   userId: string;
   form: ListingFormPayload;
-  status: 'draft' | 'pending';
+  status: 'draft' | 'pending' | 'active';
   contactPhoneFallback?: string | null;
 }): Promise<SaveListingResult> {
-  const { userId, form, status, contactPhoneFallback } = opts;
+  const { userId, form, contactPhoneFallback } = opts;
+  let status = opts.status;
+
+  // Pre-launch: skip pending queue so testers see listings live
+  if (status === 'pending' && BETA_AUTO_PUBLISH) {
+    status = 'active';
+  }
+
   const isDraft = status === 'draft';
 
   const intent = (form.listing_intent || 'long_rent') as ListingIntent;
@@ -75,7 +83,6 @@ export async function saveListingRow(opts: {
     contactPhoneFallback?.trim() ||
     '';
 
-  // Drafts: placeholder so NOT NULL contact columns don't fail
   if (!contactPhone && isDraft) {
     contactPhone = '+26800000000';
   }
@@ -145,7 +152,7 @@ export async function saveListingRow(opts: {
     if (!data?.id) {
       return { ok: false, error: 'No listing id returned' };
     }
-    return { ok: true, id: data.id };
+    return { ok: true, id: data.id, status };
   } catch (e) {
     return {
       ok: false,
