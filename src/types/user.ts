@@ -1,6 +1,6 @@
 // src/types/user.ts
 // Ekhaya personas:
-//   seeker   — renter / buyer looking for property
+//   seeker   — renter / buyer looking for property (UI label: "Renter/Buyer")
 //   landlord — property owner who posts themselves
 //   broker   — facilitator hired to find tenants/buyers
 //   agent    — licensed / established estate agent
@@ -51,6 +51,7 @@ export const getDefaultRedirect = (userType: UserType | null): string => {
 
 export const getDefaultUserType = (): UserType => 'seeker';
 
+/** UI-facing label — seeker shows as Renter/Buyer */
 export const getUserTypeLabel = (userType: UserType | null | string): string => {
   const t = normalizeUserType(userType as UserType);
   switch (t) {
@@ -63,7 +64,7 @@ export const getUserTypeLabel = (userType: UserType | null | string): string => 
     case 'broker':
       return 'Broker';
     case 'seeker':
-      return 'Seeker';
+      return 'Renter/Buyer';
     default:
       return 'User';
   }
@@ -103,7 +104,7 @@ export const isSeekerRole = (userType: UserType | null): boolean => {
 
 export const ADMIN_USER_TYPE_FILTERS: { value: string; label: string }[] = [
   { value: 'all', label: 'All users' },
-  { value: 'seeker', label: 'Seekers' },
+  { value: 'seeker', label: 'Renters/Buyers' },
   { value: 'landlord', label: 'Landlords' },
   { value: 'broker', label: 'Brokers' },
   { value: 'agent', label: 'Agents' },
@@ -112,7 +113,7 @@ export const ADMIN_USER_TYPE_FILTERS: { value: string; label: string }[] = [
 ];
 
 export const ASSIGNABLE_ROLES: { value: UserType; label: string }[] = [
-  { value: 'seeker', label: 'Seeker' },
+  { value: 'seeker', label: 'Renter/Buyer' },
   { value: 'landlord', label: 'Landlord' },
   { value: 'broker', label: 'Broker' },
   { value: 'agent', label: 'Agent' },
@@ -120,3 +121,6 @@ export const ASSIGNABLE_ROLES: { value: UserType; label: string }[] = [
 ];
 
 export const POSTER_USER_TYPES = ['landlord', 'broker', 'agent'] as const;
+
+/** localStorage key used to pass role through Google OAuth */
+export const PENDING_USER_TYPE_KEY = 'ekhaya_pending_user_type';
